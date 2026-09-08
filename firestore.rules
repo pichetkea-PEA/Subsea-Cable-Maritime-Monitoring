@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Schema Validation Helpers
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['email', 'name', 'role'])
+        && data.keys().size() <= 5
+        && data.email is string
+        && data.email.size() <= 100
+        && data.name is string
+        && data.name.size() <= 100
+        && data.role is string
+        && data.role in ['admin', 'operator', 'analyst'];
+    }
+
+    function isValidRoute(data) {
+      return data.keys().hasAll(['id', 'name', 'status', 'updatedAt'])
+        && data.id is string
+        && data.id.size() <= 128
+        && data.name is string
+        && data.name.size() <= 150
+        && data.status is string
+        && data.status in ['Operational', 'Under Observation', 'Threat Alert', 'Maintenance']
+        && data.updatedAt is string;
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['id', 'timestamp', 'mmsi', 'eventType', 'currentLat', 'currentLon', 'speedKnots', 'priority', 'status'])
+        && data.id is string
+        && data.id.size() <= 128
+        && data.timestamp is string
+        && data.mmsi is string
+        && data.mmsi.size() <= 30
+        && data.eventType is string
+        && data.eventType in ['Alarm', 'Alert']
+        && data.currentLat is number
+        && data.currentLon is number
+        && data.speedKnots is number
+        && data.priority is string
+        && data.priority in ['Critical', 'High', 'Moderate', 'Low']
+        && data.status is string
+        && data.status in ['Active', 'Investigating', 'Resolved', 'False Positive'];
+    }
+
+    // Users collection rules
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) && isValidUserProfile(incoming());
+      allow delete: if isOwner(userId);
+    }
+
+    // Routes collection rules
+    match /routes/{routeId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(routeId) && isValidRoute(incoming());
+      allow delete: if isSignedIn() && isValidId(routeId);
+    }
+
+    // Events collection rules
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(eventId) && isValidEvent(incoming());
+      allow delete: if isSignedIn() && isValidId(eventId);
+    }
+  }
+}

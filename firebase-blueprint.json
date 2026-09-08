@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Information about the registered operator or administrator",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["admin", "operator", "analyst"] },
+        "avatarUrl": { "type": "string" },
+        "department": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["email", "name", "role"]
+    },
+    "CableWaypoint": {
+      "title": "CableWaypoint",
+      "description": "Geographical coordinate on the subsea cable trace path",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 100 },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "depthMeters": { "type": "number" },
+        "sequence": { "type": "number" }
+      },
+      "required": ["id", "lat", "lng", "sequence"]
+    },
+    "CableRoute": {
+      "title": "CableRoute",
+      "description": "A subsea transmission circuit configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 100 },
+        "mainlandStation": { "type": "string", "maxLength": 100 },
+        "islandStation": { "type": "string", "maxLength": 100 },
+        "totalLengthKm": { "type": "number" },
+        "protectionCorridorMeters": { "type": "number" },
+        "status": { "type": "string", "enum": ["Operational", "Under Observation", "Threat Alert", "Maintenance"] },
+        "updatedAt": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "waypoints": {
+          "type": "array",
+          "items": { "$ref": "#/entities/CableWaypoint" }
+        }
+      },
+      "required": ["id", "name", "status", "updatedAt"]
+    },
+    "AlarmEvent": {
+      "title": "AlarmEvent",
+      "description": "AIS incident/alert record for a vessel entering the protection corridor",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "string" },
+        "mmsi": { "type": "string", "maxLength": 30 },
+        "vesselName": { "type": "string", "maxLength": 100 },
+        "shipType": { "type": "string", "maxLength": 50 },
+        "eventType": { "type": "string", "enum": ["Alarm", "Alert"] },
+        "eventDetail": { "type": "string", "maxLength": 100 },
+        "entryLat": { "type": "number" },
+        "entryLon": { "type": "number" },
+        "exitLat": { "type": "number" },
+        "exitLon": { "type": "number" },
+        "currentLat": { "type": "number" },
+        "currentLon": { "type": "number" },
+        "speedKnots": { "type": "number" },
+        "headingDegrees": { "type": "number" },
+        "grossTonnage": { "type": "number" },
+        "priority": { "type": "string", "enum": ["Critical", "High", "Moderate", "Low"] },
+        "durationMinutes": { "type": "number" },
+        "distanceToCableMeters": { "type": "number" },
+        "info": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["Active", "Investigating", "Resolved", "False Positive"] },
+        "photoUrl": { "type": "string" },
+        "callSign": { "type": "string", "maxLength": 30 },
+        "flagCountry": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "timestamp", "mmsi", "eventType", "eventDetail", "currentLat", "currentLon", "speedKnots", "priority", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile records containing names, roles, and administrative information"
+    },
+    "/routes/{routeId}": {
+      "schema": "CableRoute",
+      "description": "Saved and active subsea cable routes"
+    },
+    "/events/{eventId}": {
+      "schema": "AlarmEvent",
+      "description": "Historical and active vessel proximity alert and anchoring incident logs"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+Latitude	Longitude	Point
+9.523328	99.903333	Point 1
+9.523330	99.866663	Point 2
+9.566659	99.866663	Point 3
+9.566662	99.879994	Point 4

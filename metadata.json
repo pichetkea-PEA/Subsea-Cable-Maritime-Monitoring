@@ -1,0 +1,8 @@
+{
+  "name": "PEA-SCMM - Subsea Cable Maritime Monitoring",
+  "description": "Maritime monitoring system visualizing subsea cable infrastructure, 500m protection zones, AIS vessel tracking, alarm event summaries, and AI risk analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
