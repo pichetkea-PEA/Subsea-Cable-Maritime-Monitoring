@@ -138,8 +138,8 @@ export async function captureLeafletMap(map: L.Map, containerEl?: HTMLElement | 
 }
 
 /**
- * Calculates geographic bounds that encompass the entire subsea cable corridor
- * from starting point KP 0.0 to ending point KP 34.0, 500m safety buffer, and Samui parking zone.
+ * Calculates geographic bounds that encompass the active subsea cable corridor
+ * from starting point to ending point, safety buffer, and adjacent parking zone if applicable.
  */
 export function getFullCorridorBounds(
   waypoints: { lat: number; lng: number }[],
@@ -148,29 +148,37 @@ export function getFullCorridorBounds(
 ): L.LatLngBounds {
   const points: [number, number][] = [];
 
-  // 1. Waypoints covering KP 0.0 to KP 34.0
+  // 1. Waypoints covering the entire active cable route
   if (Array.isArray(waypoints) && waypoints.length > 0) {
     waypoints.forEach(wp => {
-      if (wp && typeof wp.lat === 'number' && typeof wp.lng === 'number') {
+      if (wp && typeof wp.lat === 'number' && typeof wp.lng === 'number' && !isNaN(wp.lat) && !isNaN(wp.lng)) {
         points.push([wp.lat, wp.lng]);
       }
     });
   }
 
-  // 2. Samui Parking Zone coordinates
-  if (Array.isArray(parkingCoords) && parkingCoords.length > 0) {
-    parkingCoords.forEach(pc => {
-      if (pc && typeof pc.lat === 'number' && typeof pc.lng === 'number') {
-        points.push([pc.lat, pc.lng]);
-      }
-    });
+  // 2. Parking Zone coordinates (only include if geographically adjacent to the cable route <= 0.6 deg ~ 65km)
+  if (Array.isArray(parkingCoords) && parkingCoords.length > 0 && points.length > 0) {
+    const isAdjacent = parkingCoords.some(pc =>
+      points.some(([wLat, wLng]) => Math.abs(pc.lat - wLat) < 0.6 && Math.abs(pc.lng - wLng) < 0.6)
+    );
+    if (isAdjacent) {
+      parkingCoords.forEach(pc => {
+        if (pc && typeof pc.lat === 'number' && typeof pc.lng === 'number') {
+          points.push([pc.lat, pc.lng]);
+        }
+      });
+    }
   }
 
-  // 3. Additional offset label points (to ensure labels outside the buffer zone stay in view)
-  if (Array.isArray(additionalPoints) && additionalPoints.length > 0) {
+  // 3. Additional offset label points (to ensure labels stay in view, only if geographically near)
+  if (Array.isArray(additionalPoints) && additionalPoints.length > 0 && points.length > 0) {
     additionalPoints.forEach(p => {
       if (p && typeof p.lat === 'number' && typeof p.lng === 'number') {
-        points.push([p.lat, p.lng]);
+        const isNear = points.some(([wLat, wLng]) => Math.abs(p.lat - wLat) < 0.6 && Math.abs(p.lng - wLng) < 0.6);
+        if (isNear) {
+          points.push([p.lat, p.lng]);
+        }
       }
     });
   }
@@ -180,6 +188,8 @@ export function getFullCorridorBounds(
   }
 
   const bounds = L.latLngBounds(points);
-  // Tight padding (0.01) so the corridor zooms in closer and fills the frame with high thermal detail
-  return bounds.pad(0.01);
+  // Padding so all corridor components, labels, and badges stay completely within the visible frame
+  const spanLng = bounds.getEast() - bounds.getWest();
+  const padFactor = spanLng < 0.2 ? 0.16 : 0.10;
+  return bounds.pad(padFactor);
 }

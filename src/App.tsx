@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CableRoute, AlarmEvent, HistoricalShipSummary, UserProfile, ParkingZone } from './types';
 import { DEFAULT_CABLE_ROUTE, INITIAL_ALARM_EVENTS, INITIAL_HISTORICAL_SHIPS, DEFAULT_USER, DEFAULT_PARKING_ZONE } from './data/mockData';
 import { parseCableRouteFile, parseAlarmEventsCSV, parseParkingZoneText } from './utils/geoUtils';
@@ -125,6 +125,15 @@ export default function App() {
   const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
+  // In-memory ref flag to strictly lock datasets once user confirms route on Page 1
+  const userConfirmedRef = useRef<boolean>(() => {
+    try {
+      return localStorage.getItem('subsea_user_confirmed_route') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   // Handler to update alarm events and sync both locally and to Firestore
   const handleUpdateAlarmEvents = (newEvents: AlarmEvent[]) => {
     setEvents(newEvents);
@@ -136,10 +145,18 @@ export default function App() {
     saveAlarmEventsToFirestore(newEvents).catch(err => console.warn('Firestore sync events:', err));
   };
 
-  // Load default cable route and alarm events on app mount
+  // Load default cable route and alarm events on app mount (ONLY if no active route exists)
   useEffect(() => {
     const initDefaultFiles = async () => {
       try {
+        const savedActive = localStorage.getItem('subsea_active_cable_route');
+        const userConfirmed = localStorage.getItem('subsea_user_confirmed_route');
+        
+        // If the user already selected, uploaded, or confirmed a route, preserve it strictly!
+        if (savedActive || userConfirmed) {
+          return;
+        }
+
         const routeRes = await fetch('/Lat long of circuit 3.txt');
         if (routeRes.ok) {
           const routeText = await routeRes.text();
@@ -147,13 +164,8 @@ export default function App() {
           parsedRoute.id = 'circuit-3-samui';
           parsedRoute.isDefault = true;
 
-          // Check if local storage or cloud already has an active route, otherwise set default
-          const savedActive = localStorage.getItem('subsea_active_cable_route');
-          const shouldUpdate = !savedActive || (savedActive && (JSON.parse(savedActive).waypoints?.length || 0) < 2500);
-          if (shouldUpdate) {
-            setCableRoute(parsedRoute);
-            localStorage.setItem('subsea_active_cable_route', JSON.stringify(parsedRoute));
-          }
+          setCableRoute(parsedRoute);
+          localStorage.setItem('subsea_active_cable_route', JSON.stringify(parsedRoute));
 
           const savedEvents = localStorage.getItem('subsea_alarm_events');
           if (!savedEvents) {
@@ -196,7 +208,17 @@ export default function App() {
   useEffect(() => {
     const loadFirestoreData = async () => {
       try {
+        const savedActive = localStorage.getItem('subsea_active_cable_route');
+        const userConfirmed = localStorage.getItem('subsea_user_confirmed_route');
+        // If user already confirmed route or has active route, strictly do NOT recall from Firestore!
+        if (userConfirmedRef.current || userConfirmed === 'true' || savedActive) {
+          return;
+        }
+
         const cloudRoutes = await getCableRoutesFromFirestore();
+        if (userConfirmedRef.current || localStorage.getItem('subsea_user_confirmed_route') === 'true') {
+          return;
+        }
         if (cloudRoutes.length > 0) {
           setSavedRoutes(cloudRoutes);
           const active = cloudRoutes.find(r => r.isDefault) || cloudRoutes[0];
@@ -204,9 +226,11 @@ export default function App() {
         }
 
         const savedEvents = localStorage.getItem('subsea_alarm_events');
-        // Only load cloud events if local storage has no user data
         if (!savedEvents) {
           const cloudEvents = await getAlarmEventsFromFirestore();
+          if (userConfirmedRef.current || localStorage.getItem('subsea_user_confirmed_route') === 'true') {
+            return;
+          }
           if (cloudEvents.length > 0) {
             setEvents(cloudEvents);
             localStorage.setItem('subsea_alarm_events', JSON.stringify(cloudEvents));
@@ -228,19 +252,20 @@ export default function App() {
       localStorage.setItem('subsea_is_authenticated', 'true');
       localStorage.setItem('subsea_user_profile', JSON.stringify(user));
 
-      // Automatically load default cable route (115 kV Koh Samui circuit 3)
-      const routeRes = await fetch('/Lat long of circuit 3.txt');
-      if (routeRes.ok) {
-        const routeText = await routeRes.text();
-        const parsedRoute = parseCableRouteFile(routeText, '115 kV Koh Samui circuit 3');
-        parsedRoute.id = 'circuit-3-samui';
-        parsedRoute.isDefault = true;
-        setCableRoute(parsedRoute);
-        localStorage.setItem('subsea_active_cable_route', JSON.stringify(parsedRoute));
-        saveCableRouteToFirestore(parsedRoute).catch(err => console.warn('Firestore sync route:', err));
+      // Only load default preset if NO user route exists yet
+      const savedActive = localStorage.getItem('subsea_active_cable_route');
+      const userConfirmed = localStorage.getItem('subsea_user_confirmed_route');
+      if (!savedActive && !userConfirmed) {
+        const routeRes = await fetch('/Lat long of circuit 3.txt');
+        if (routeRes.ok) {
+          const routeText = await routeRes.text();
+          const parsedRoute = parseCableRouteFile(routeText, '115 kV Koh Samui circuit 3');
+          parsedRoute.id = 'circuit-3-samui';
+          parsedRoute.isDefault = true;
+          setCableRoute(parsedRoute);
+          localStorage.setItem('subsea_active_cable_route', JSON.stringify(parsedRoute));
+          saveCableRouteToFirestore(parsedRoute).catch(err => console.warn('Firestore sync route:', err));
 
-        const savedEvents = localStorage.getItem('subsea_alarm_events');
-        if (!savedEvents) {
           const eventsRes = await fetch('/Default Alarm Event.csv');
           if (eventsRes.ok) {
             const eventsText = await eventsRes.text();
@@ -363,8 +388,18 @@ export default function App() {
             currentRoute={cableRoute}
             savedRoutes={savedRoutes}
             events={events}
-            onConfirmAndProceed={(newRoute) => {
+            onConfirmAndProceed={(newRoute, newEvents) => {
+              userConfirmedRef.current = true;
               handleUpdateCableRoute(newRoute);
+              const finalEvents = (newEvents && newEvents.length > 0) ? newEvents : events;
+              handleUpdateAlarmEvents(finalEvents);
+              try {
+                localStorage.setItem('subsea_user_confirmed_route', 'true');
+                localStorage.setItem('subsea_active_cable_route', JSON.stringify(newRoute));
+                localStorage.setItem('subsea_alarm_events', JSON.stringify(finalEvents));
+              } catch (e) {
+                console.warn('LocalStorage save error:', e);
+              }
               setActiveTab('dashboard');
             }}
             onUpdateCableRoute={handleUpdateCableRoute}

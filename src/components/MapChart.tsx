@@ -3,7 +3,7 @@ import L from 'leaflet';
 import { CableRoute, AlarmEvent, ParkingZone } from '../types';
 import { generateCableBufferPolygon, isPointInPolygon, calculatePolygonAreaSqKm } from '../utils/geoUtils';
 import { captureLeafletMap, getFullCorridorBounds } from '../utils/mapCapture';
-import { Layers, Shield, Compass, ZoomIn, ZoomOut, Maximize2, AlertTriangle, Ship, Flame, Anchor, Camera, CheckCircle2 } from 'lucide-react';
+import { Layers, Shield, Compass, ZoomIn, ZoomOut, Maximize2, AlertTriangle, Ship, Flame, Anchor, Camera, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { ShipPhoto } from './ShipPhoto';
 
 interface MapChartProps {
@@ -50,6 +50,7 @@ export const MapChart: React.FC<MapChartProps> = ({
   const [activeHoverVessel, setActiveHoverVessel] = useState<AlarmEvent | null>(null);
   const [isCapturingMap, setIsCapturingMap] = useState(false);
   const [mapCaptureMessage, setMapCaptureMessage] = useState<string | null>(null);
+  const [isLegendExpanded, setIsLegendExpanded] = useState(false);
 
   // Reliable, free tile URLs with ZERO API key required
   const tileUrls = {
@@ -682,46 +683,60 @@ export const MapChart: React.FC<MapChartProps> = ({
           </div>
         )}
 
-        {/* Map Legend Overlay */}
-        <div className="absolute bottom-3 left-3 bg-slate-900/90 backdrop-blur-md border border-slate-800/90 p-2.5 rounded-lg shadow-2xl text-[11px] text-slate-300 pointer-events-auto z-[400] max-w-[240px]">
-          <div className="font-bold text-slate-100 mb-1.5 flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-cyan-400" />
-            Chart Symbols & Legend
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-1 bg-cyan-400 rounded-sm"></span>
-              <span>Subsea Cable Centerline</span>
+        {/* Map Legend Overlay (Collapsible so it never covers Koh Si Chang Island or cable route) */}
+        <div className="absolute bottom-3 left-3 bg-slate-900/95 backdrop-blur-md border border-slate-800 rounded-lg shadow-2xl text-[11px] text-slate-300 pointer-events-auto z-[400] max-w-[240px] transition-all">
+          <button
+            onClick={() => setIsLegendExpanded(!isLegendExpanded)}
+            className="w-full font-bold text-slate-100 p-2 flex items-center justify-between gap-2 hover:text-white cursor-pointer select-none"
+            title={isLegendExpanded ? 'Collapse Legend' : 'Expand Chart Legend'}
+          >
+            <div className="flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Chart Legend</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-2.5 bg-amber-500/20 border border-amber-500 border-dashed rounded-sm"></span>
-              <span>500m Safety Corridor</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm"></span>
-              <span><strong className="text-rose-400">Alert</strong>: Ship Anchoring</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-              <span><strong className="text-amber-400">Alarm</strong>: Ship Enter</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-              <span><strong className="text-sky-300">Alarm</strong>: Ship Exit</span>
-            </div>
-            {parkingZone && showParkingZone && (
+            {isLegendExpanded ? (
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            ) : (
+              <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+            )}
+          </button>
+
+          {isLegendExpanded && (
+            <div className="px-2.5 pb-2.5 pt-0 space-y-1.5 border-t border-slate-800/80 mt-0.5">
+              <div className="flex items-center gap-2 pt-1.5">
+                <span className="w-4 h-1 bg-cyan-400 rounded-sm"></span>
+                <span>Subsea Cable Centerline</span>
+              </div>
               <div className="flex items-center gap-2">
-                <span className="w-3 h-2 rounded border border-dashed border-blue-400 bg-blue-600/40"></span>
-                <span><strong className="text-blue-400">Parking Zone</strong>: Large-Size Ships</span>
+                <span className="w-4 h-2.5 bg-amber-500/20 border border-amber-500 border-dashed rounded-sm"></span>
+                <span>500m Safety Corridor</span>
               </div>
-            )}
-            {showHeatMap && (
-              <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
-                <span className="w-4 h-2 rounded bg-gradient-to-r from-blue-500 via-amber-400 to-rose-500"></span>
-                <span>Traffic Density Heat Map</span>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm"></span>
+                <span><strong className="text-rose-400">Alert</strong>: Ship Anchoring</span>
               </div>
-            )}
-          </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                <span><strong className="text-amber-400">Alarm</strong>: Ship Enter</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+                <span><strong className="text-sky-300">Alarm</strong>: Ship Exit</span>
+              </div>
+              {parkingZone && showParkingZone && (
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-2 rounded border border-dashed border-blue-400 bg-blue-600/40"></span>
+                  <span><strong className="text-blue-400">Parking Zone</strong>: Large-Size Ships</span>
+                </div>
+              )}
+              {showHeatMap && (
+                <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
+                  <span className="w-4 h-2 rounded bg-gradient-to-r from-blue-500 via-amber-400 to-rose-500"></span>
+                  <span>Traffic Density Heat Map</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Map Zoom / Recenter Quick Controls */}

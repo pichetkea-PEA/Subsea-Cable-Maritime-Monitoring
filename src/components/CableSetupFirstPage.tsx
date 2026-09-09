@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { CableRoute, AlarmEvent } from '../types';
-import { parseCableRouteFile, parseAlarmEventsCSV } from '../utils/geoUtils';
+import { parseCableRouteFile, parseAlarmEventsCSV, getEventsDateRange } from '../utils/geoUtils';
 import { importCableRouteFromGoogleSheet, importAlarmEventsFromGoogleSheet } from '../utils/googleSheetsUtils';
 import { SAMPLE_CABLE_CSV, SAMPLE_ALARMS_CSV } from '../data/mockData';
 import {
@@ -18,6 +18,7 @@ import {
   Table,
   Link,
   Loader2,
+  Calendar,
 } from 'lucide-react';
 
 interface CableSetupFirstPageProps {
@@ -38,15 +39,32 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
   onUpdateAlarmEvents,
 }) => {
   // Cable Route Form state
-  const [routeName, setRouteName] = useState('115 kV Koh Samui circuit 3');
-  const [cableCoordsText, setCableCoordsText] = useState('');
+  const [routeName, setRouteName] = useState(currentRoute?.name || '115 kV Koh Samui circuit 3');
+  const [cableCoordsText, setCableCoordsText] = useState(
+    currentRoute?.waypoints && currentRoute.waypoints.length > 0
+      ? currentRoute.waypoints.map(w => `${w.lat}, ${w.lng}`).join('\n')
+      : ''
+  );
   const [parsedRoute, setParsedRoute] = useState<CableRoute>(currentRoute);
   const [cableError, setCableError] = useState<string | null>(null);
   const [cableSuccess, setCableSuccess] = useState<string | null>(null);
 
   // Companion CSV state
+  const [rawAlarmCsvText, setRawAlarmCsvText] = useState<string>('');
+  const [currentUploadedEvents, setCurrentUploadedEvents] = useState<AlarmEvent[]>(events);
   const [alarmsParsedCount, setAlarmsParsedCount] = useState<number>(events.length);
   const [alarmsStatus, setAlarmsStatus] = useState<string | null>(null);
+
+  // Synchronize with parent events if local CSV not uploaded yet
+  useEffect(() => {
+    if (!rawAlarmCsvText && events && events.length > 0) {
+      setCurrentUploadedEvents(events);
+      setAlarmsParsedCount(events.length);
+    }
+  }, [events, rawAlarmCsvText]);
+
+  // Detected date period from uploaded events
+  const detectedPeriod = useMemo(() => getEventsDateRange(currentUploadedEvents), [currentUploadedEvents]);
 
   // Google Sheets Import Modal State
   const [isSheetsModalOpen, setIsSheetsModalOpen] = useState(false);
@@ -56,7 +74,7 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
 
-  // Load default preset "115 kV Koh Samui circuit 3" on mount automatically
+  // Load default preset ONLY if there is no currentRoute configured
   React.useEffect(() => {
     const loadDefaultPreset = async () => {
       try {
@@ -78,11 +96,12 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
       }
     };
 
-    if (!currentRoute || currentRoute.waypoints.length < 2500 || currentRoute.name === '115 kV Koh Samui circuit 3' || currentRoute.name.includes('Circuit #2')) {
+    if (!currentRoute || !currentRoute.waypoints || currentRoute.waypoints.length === 0) {
       loadDefaultPreset();
     } else {
       setRouteName(currentRoute.name);
       setCableCoordsText(currentRoute.waypoints.map(w => `${w.lat}, ${w.lng}`).join('\n'));
+      setParsedRoute(currentRoute);
     }
   }, []);
 
@@ -108,6 +127,20 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
       const parsed = parseCableRouteFile(text, name.trim() || 'Subsea Cable Circuit');
       setParsedRoute(parsed);
       setCableSuccess(`Valid circuit: ${parsed.waypoints.length} waypoints (${parsed.totalLengthKm} km)`);
+
+      // If user has already uploaded alarm CSV, re-calculate distances against this updated route!
+      if (rawAlarmCsvText) {
+        try {
+          const reParsed = parseAlarmEventsCSV(rawAlarmCsvText, parsed.waypoints);
+          setCurrentUploadedEvents(reParsed);
+          onUpdateAlarmEvents(reParsed);
+          setAlarmsParsedCount(reParsed.length);
+          setAlarmsStatus(`Synchronized ${reParsed.length} alarm records to ${parsed.name}.`);
+        } catch {
+          // ignore
+        }
+      }
+
       return parsed;
     } catch (err: any) {
       setCableError(err.message || 'Invalid coordinates format');
@@ -133,11 +166,14 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
     reader.onload = ev => {
       try {
         const text = ev.target?.result as string;
+        setRawAlarmCsvText(text);
         const parsed = parseAlarmEventsCSV(text, parsedRoute.waypoints);
         if (parsed.length === 0) throw new Error('No alarm rows found in CSV');
+        setCurrentUploadedEvents(parsed);
         onUpdateAlarmEvents(parsed);
         setAlarmsParsedCount(parsed.length);
-        setAlarmsStatus(`Imported ${parsed.length} alarm & alert records.`);
+        const range = getEventsDateRange(parsed);
+        setAlarmsStatus(`Imported ${parsed.length} alarm records (${range.formattedRange}, ${range.totalDays} ${range.totalDays === 1 ? 'day' : 'days'}).`);
       } catch (e: any) {
         setAlarmsStatus(`Error: ${e.message}`);
       }
@@ -146,7 +182,7 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
   };
 
   // Quick Preset Selector
-  const handleSelectPreset = async (preset: 'samui_3' | 'samui' | 'phangan' | 'phuket') => {
+  const handleSelectPreset = async (preset: 'samui_3' | 'sichang' | 'phangan' | 'phuket') => {
     let name = '';
     let text = '';
     if (preset === 'samui_3') {
@@ -161,9 +197,14 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
       } catch {
         text = SAMPLE_CABLE_CSV;
       }
-    } else if (preset === 'samui') {
-      name = 'Mainland (Khanom) – Ko Samui 115kV Cable Transmission Circuit #2';
-      text = SAMPLE_CABLE_CSV;
+    } else if (preset === 'sichang') {
+      name = '22kV Koh Si Chang';
+      // Koh Si Chang Island is on the West (100.8120), Si Racha Mainland is on the East (100.9210)
+      text = `13.1510, 100.8120, 6, Koh Si Chang Island Terminal KP 0.0
+13.1580, 100.8380, 22, Marine Protection Corridor KP 2.8
+13.1630, 100.8650, 26, Fairway Midpoint KP 5.9
+13.1680, 100.8950, 15, Nearshore Channel KP 8.7
+13.1720, 100.9210, 4, Si Racha Shore Terminal KP 11.5`;
     } else if (preset === 'phangan') {
       name = 'Ko Samui – Ko Phangan 33kV Subsea Circuit';
       text = `9.5580, 100.0350, 4, Samui North Substation
@@ -187,8 +228,19 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
   const handleProceed = () => {
     const valid = handleParseCableInput(cableCoordsText, routeName);
     if (!valid) return;
+    
+    let finalEvents = currentUploadedEvents.length > 0 ? currentUploadedEvents : events;
+    if (rawAlarmCsvText) {
+      try {
+        finalEvents = parseAlarmEventsCSV(rawAlarmCsvText, valid.waypoints);
+      } catch {
+        // use current
+      }
+    }
+
     onUpdateCableRoute(valid);
-    onConfirmAndProceed(valid);
+    onUpdateAlarmEvents(finalEvents);
+    onConfirmAndProceed(valid, finalEvents);
   };
 
   // Execute Google Sheet Import
@@ -345,15 +397,15 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => handleSelectPreset('samui')}
+                  onClick={() => handleSelectPreset('sichang')}
                   className={`p-2.5 rounded-xl border text-left text-xs transition cursor-pointer ${
-                    routeName.includes('Transmission Circuit #2')
+                    routeName.includes('Koh Si Chang') || routeName.includes('Si Chang')
                       ? 'bg-blue-950/80 border-blue-500 ring-1 ring-blue-500 text-white'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
                   }`}
                 >
-                  <div className="font-bold text-slate-200 text-[11px]">Samui Circuit #2</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">115kV Cable (24 km)</div>
+                  <div className="font-bold text-slate-200 text-[11px]">22kV Koh Si Chang</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">22kV Cable (Si Racha – Si Chang)</div>
                 </button>
 
                 <button
@@ -544,6 +596,26 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
               <p className="text-[11px] text-slate-400">
                 AIS corridor crossing alarms and anchoring alerts with vessel MMSI, ship type, coordinates, speed, and tonnage.
               </p>
+
+              {/* Detected Event Date Period from CSV */}
+              <div className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800">
+                <span className="flex items-center gap-1.5 text-slate-400">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Date Period (from CSV):</span>
+                </span>
+                <span className="font-mono font-semibold text-cyan-300">
+                  {detectedPeriod.totalDays > 0 ? (
+                    <>
+                      {detectedPeriod.startDate} – {detectedPeriod.endDate}
+                      <span className="text-slate-400 font-normal ml-1">
+                        ({detectedPeriod.totalDays} {detectedPeriod.totalDays === 1 ? 'day' : 'days'})
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-500 font-normal">No dates detected</span>
+                  )}
+                </span>
+              </div>
 
               <div className="flex flex-wrap items-center justify-between text-xs pt-1 gap-2">
                 <div className="flex items-center gap-2">

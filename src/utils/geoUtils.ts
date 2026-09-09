@@ -276,11 +276,29 @@ export function parseCableRouteFile(
     calculatedKm = 52.00;
   }
 
+  const isSamuiRoute = routeName.toLowerCase().includes('samui') || routeName.toLowerCase().includes('khanom');
+  const isSiChangRoute = routeName.toLowerCase().includes('sichang') || routeName.toLowerCase().includes('si chang') ||
+    waypoints.some(wp => Math.abs(wp.lat - 13.16) < 0.25 && Math.abs(wp.lng - 100.86) < 0.25);
+
+  const firstWpName = waypoints[0]?.name && !waypoints[0].name.startsWith('WP-') ? waypoints[0].name : null;
+  const lastWpName = waypoints[waypoints.length - 1]?.name && !waypoints[waypoints.length - 1].name.startsWith('WP-') ? waypoints[waypoints.length - 1].name : null;
+
+  let mainlandStation = firstWpName || (isSamuiRoute ? 'Mainland (Khanom) Terminal' : 'Mainland Shore Terminal');
+  let islandStation = lastWpName || (isSamuiRoute ? 'Ko Samui Substation' : 'Island Receiving Terminal');
+
+  if (isSiChangRoute) {
+    // Koh Si Chang is located on the West (Left, ~100.81°E), Si Racha Mainland is on the East (Right, ~100.92°E)
+    const mainlandName = [firstWpName, lastWpName].find(n => n && (n.includes('Racha') || n.includes('Mainland') || n.includes('Shore')));
+    const islandName = [firstWpName, lastWpName].find(n => n && (n.includes('Chang') || n.includes('Island')));
+    mainlandStation = mainlandName || 'Si Racha Shore Terminal';
+    islandStation = islandName || 'Koh Si Chang Terminal';
+  }
+
   return {
     id: `route-${Date.now()}`,
     name: routeName,
-    mainlandStation: waypoints[0].name || 'Mainland (Khanom) Terminal',
-    islandStation: waypoints[waypoints.length - 1].name || 'Ko Samui Substation',
+    mainlandStation,
+    islandStation,
     totalLengthKm: calculatedKm,
     protectionCorridorMeters: 500,
     status: 'Operational',
@@ -305,7 +323,14 @@ function extractSpeedFromText(text: any): number | null {
 }
 
 /**
- * Normalizes Date from Column B and Time from Column C safely.
+ * Normalizes Date and Time safely from any format.
+ * Supports:
+ * - DD/MM/YYYY, D/M/YYYY, DD-MM-YYYY, DD.MM.YYYY
+ * - YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+ * - Thai Buddhist Era years (2560..2580 -> converted to 2017..2037)
+ * - 2-digit years (e.g. 26 -> 2026)
+ * - Excel date serial numbers (e.g. 45000..65000)
+ * - Combined DateTime strings (e.g. "1/9/2026 11:07:00" or ISO format)
  * Will never produce an "Invalid Date".
  */
 export function normalizeDateTime(dateVal: any, timeVal: any, fallbackIdx = 0): string {
@@ -340,46 +365,213 @@ export function normalizeDateTime(dateVal: any, timeVal: any, fallbackIdx = 0): 
     }
   }
 
+  // Format clean time portion
+  let cleanTime = '00:00:00';
+  const timeMatch = tStr.match(/(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+  if (timeMatch) {
+    const [, hr, mn, sec = '00'] = timeMatch;
+    cleanTime = `${hr.padStart(2, '0')}:${mn.padStart(2, '0')}:${sec.padStart(2, '0')}`;
+  }
+
   // Fallback for empty dateVal
-  if (!datePart || datePart.toLowerCase() === 'colb' || datePart.toLowerCase() === 'date' || datePart.toLowerCase() === 'event date' || datePart.toLowerCase() === 'event_date') {
+  const lowerDate = datePart.toLowerCase();
+  if (
+    !datePart ||
+    lowerDate === 'colb' ||
+    lowerDate === 'date' ||
+    lowerDate === 'event date' ||
+    lowerDate === 'event_date' ||
+    lowerDate === 'null' ||
+    lowerDate === 'undefined' ||
+    lowerDate === 'n/a'
+  ) {
     const now = new Date(Date.now() - fallbackIdx * 1800000);
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
-    const h = String(now.getHours()).padStart(2, '0');
-    const min = String(now.getMinutes()).padStart(2, '0');
-    const s = String(now.getSeconds()).padStart(2, '0');
-    return `${y}-${m}-${d} ${h}:${min}:${s}`;
+    return `${y}-${m}-${d} ${cleanTime}`;
   }
 
-  // Format clean time portion
-  let cleanTime = tStr;
-  const timeMatch = cleanTime.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
-  if (timeMatch) {
-    const [, hr, mn, sec = '00'] = timeMatch;
-    cleanTime = `${hr.padStart(2, '0')}:${mn.padStart(2, '0')}:${sec.padStart(2, '0')}`;
-  } else if (!cleanTime || cleanTime.toLowerCase() === 'colc' || cleanTime.toLowerCase() === 'time') {
-    cleanTime = '00:00:00';
+  // Check Excel serial number (e.g. 45000 to 65000 represents dates from 2023 to 2078)
+  const numericVal = Number(datePart);
+  if (!isNaN(numericVal) && numericVal >= 35000 && numericVal <= 65000) {
+    const dObj = new Date(Math.round((numericVal - 25569) * 86400 * 1000));
+    if (!isNaN(dObj.getTime())) {
+      const y = dObj.getUTCFullYear();
+      const m = String(dObj.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(dObj.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d} ${cleanTime}`;
+    }
   }
 
-  // Parse date portion (Column B store in date format DD/MM/YYYY or D/M/YYYY)
-  // Check DD/MM/YYYY or D/M/YYYY
-  const dmyMatch = datePart.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
-  if (dmyMatch) {
-    const [, day, month, year] = dmyMatch;
-    const pad = (v: string) => v.padStart(2, '0');
-    return `${year}-${pad(month)}-${pad(day)} ${cleanTime}`;
-  }
-
-  // Check YYYY-MM-DD or YYYY/MM/DD
+  // Check YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
   const ymdMatch = datePart.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/);
   if (ymdMatch) {
-    const [, year, month, day] = ymdMatch;
-    const pad = (v: string) => v.padStart(2, '0');
+    let year = parseInt(ymdMatch[1], 10);
+    const month = parseInt(ymdMatch[2], 10);
+    const day = parseInt(ymdMatch[3], 10);
+    if (year > 2400) year -= 543; // Buddhist Era conversion
+    const pad = (v: number) => String(v).padStart(2, '0');
     return `${year}-${pad(month)}-${pad(day)} ${cleanTime}`;
+  }
+
+  // Check DD/MM/YYYY, D/M/YYYY, DD-MM-YYYY, DD.MM.YYYY, or MM/DD/YYYY
+  const dmyMatch = datePart.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+  if (dmyMatch) {
+    const p1 = parseInt(dmyMatch[1], 10);
+    const p2 = parseInt(dmyMatch[2], 10);
+    const rawYear = parseInt(dmyMatch[3], 10);
+    let year = rawYear < 100 ? (rawYear < 50 ? 2000 + rawYear : 1900 + rawYear) : rawYear;
+    if (year > 2400) year -= 543; // Buddhist Era conversion
+
+    let day = p1;
+    let month = p2;
+    if (p1 > 12 && p2 <= 12) {
+      day = p1;
+      month = p2;
+    } else if (p2 > 12 && p1 <= 12) {
+      day = p2;
+      month = p1;
+    } else {
+      // Default to DD/MM/YYYY in Thai and maritime standards (e.g. 1/9/2026 is Sep 1, 2026)
+      day = p1;
+      month = p2;
+    }
+    const pad = (v: number) => String(v).padStart(2, '0');
+    return `${year}-${pad(month)}-${pad(day)} ${cleanTime}`;
+  }
+
+  // Fallback to JS Date parser if available
+  const parsedD = new Date(datePart);
+  if (!isNaN(parsedD.getTime())) {
+    let y = parsedD.getFullYear();
+    if (y > 2400) y -= 543;
+    const m = String(parsedD.getMonth() + 1).padStart(2, '0');
+    const d = String(parsedD.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d} ${cleanTime}`;
   }
 
   return `${datePart} ${cleanTime}`;
+}
+
+/**
+ * Intelligent extractor for Date and Time strings from any CSV row,
+ * examining column headers, cell values, and regex patterns.
+ */
+export function extractDateTimeFromCsvRow(
+  row: any[],
+  headerMap: Record<string, number>,
+  colB_Idx: number,
+  colC_Idx: number
+): { rawDateVal: string; rawTimeVal: string } {
+  if (!row || row.length === 0) {
+    return { rawDateVal: '', rawTimeVal: '00:00:00' };
+  }
+
+  const isDateLike = (str: string): boolean => {
+    if (!str || typeof str !== 'string') return false;
+    const s = str.trim();
+    if (/^\d{4}[/\-.]\d{1,2}[/\-.]\d{1,2}/.test(s)) return true;
+    if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}/.test(s)) return true;
+    // Excel serial date (e.g. 45000 to 65000)
+    const n = Number(s);
+    if (!isNaN(n) && n >= 35000 && n <= 65000) return true;
+    return false;
+  };
+
+  const isTimeLike = (str: string): boolean => {
+    if (!str || typeof str !== 'string') return false;
+    return /^\d{1,2}:\d{1,2}(?::\d{1,2})?/.test(str.trim());
+  };
+
+  let foundDate = '';
+  let foundTime = '';
+
+  // 1. Check explicit header matches if present
+  let headerDateIdx = -1;
+  let headerTimeIdx = -1;
+  let headerDateTimeIdx = -1;
+
+  for (const [colName, idx] of Object.entries(headerMap)) {
+    const c = colName.toLowerCase().trim();
+    if (c === 'datetime' || c === 'date/time' || c === 'date_time' || c === 'timestamp') {
+      headerDateTimeIdx = idx;
+    } else if (c === 'date' || c === 'event_date' || c === 'date of event' || c === 'eventdate' || c.startsWith('date')) {
+      headerDateIdx = idx;
+    } else if (c === 'time' || c === 'event_time' || c === 'time of event' || c === 'eventtime') {
+      headerTimeIdx = idx;
+    }
+  }
+
+  if (headerDateTimeIdx >= 0 && headerDateTimeIdx < row.length) {
+    const val = String(row[headerDateTimeIdx] ?? '').trim();
+    if (isDateLike(val)) foundDate = val;
+  }
+
+  if (!foundDate && headerDateIdx >= 0 && headerDateIdx < row.length) {
+    const val = String(row[headerDateIdx] ?? '').trim();
+    if (isDateLike(val)) foundDate = val;
+  }
+
+  if (headerTimeIdx >= 0 && headerTimeIdx < row.length) {
+    const val = String(row[headerTimeIdx] ?? '').trim();
+    if (isTimeLike(val)) foundTime = val;
+  }
+
+  // 2. If header mapping didn't find date, check configured colB_Idx and standard columns
+  if (!foundDate) {
+    const candidateIndices = [colB_Idx, 1, 0, 2, 3];
+    for (const idx of candidateIndices) {
+      if (idx >= 0 && idx < row.length) {
+        const val = String(row[idx] ?? '').trim();
+        if (isDateLike(val)) {
+          foundDate = val;
+          break;
+        }
+      }
+    }
+  }
+
+  // 3. If still no date found, scan all row cells
+  if (!foundDate) {
+    for (let c = 0; c < row.length; c++) {
+      const val = String(row[c] ?? '').trim();
+      if (isDateLike(val)) {
+        foundDate = val;
+        break;
+      }
+    }
+  }
+
+  // 4. If time not found, check colC_Idx and other columns
+  if (!foundTime) {
+    const timeCandidates = [colC_Idx, 2, 1, 0, 3];
+    for (const idx of timeCandidates) {
+      if (idx >= 0 && idx < row.length) {
+        const val = String(row[idx] ?? '').trim();
+        if (isTimeLike(val)) {
+          foundTime = val;
+          break;
+        }
+      }
+    }
+  }
+
+  // 5. If foundDate contains combined Date and Time, separate them
+  if (foundDate && (foundDate.includes(' ') || foundDate.includes('T'))) {
+    const parts = foundDate.split(/[\sT]+/);
+    if (isDateLike(parts[0])) {
+      foundDate = parts[0];
+      if (!foundTime && parts[1] && isTimeLike(parts[1])) {
+        foundTime = parts[1];
+      }
+    }
+  }
+
+  return {
+    rawDateVal: foundDate || (row[1] !== undefined ? String(row[1]) : ''),
+    rawTimeVal: foundTime || (row[2] !== undefined ? String(row[2]) : '00:00:00'),
+  };
 }
 
 /**
@@ -646,16 +838,8 @@ export function parseAlarmEventsCSV(
     const row = dataRows[idx];
     if (!row || row.length === 0) continue;
 
-    // 1. Column B (Date, e.g. 1/9/2026) and Column C (Time, e.g. 11:07:00) for event timestamp
-    let rawDateVal = row[1] !== undefined && String(row[1]).trim() !== '' ? row[1] : (colB_Idx < row.length ? row[colB_Idx] : row[0]);
-    let rawTimeVal = row[2] !== undefined && String(row[2]).trim() !== '' ? row[2] : (colC_Idx < row.length ? row[colC_Idx] : row[0]);
-
-    // If row[1] is Date and row[2] is Time, explicitly pass them
-    if (row[1] && row[2] && String(row[1]).includes('/') && (String(row[2]).includes(':') || String(row[2]).length <= 8)) {
-      rawDateVal = row[1];
-      rawTimeVal = row[2];
-    }
-
+    // 1. Extract Date and Time accurately using intelligent column & pattern detection
+    const { rawDateVal, rawTimeVal } = extractDateTimeFromCsvRow(row, headerMap, colB_Idx, colC_Idx);
     const timestamp = normalizeDateTime(rawDateVal, rawTimeVal, idx);
 
     // 2. Column E: Condition (3 levels: "In zone", "On enter", "On exit")
@@ -892,23 +1076,45 @@ export function getEventsDateRange(events: AlarmEvent[]): {
     if (!evt.timestamp) continue;
     
     // Extract date component (before space or T)
-    const datePart = evt.timestamp.trim().split(/[\sT]+/)[0];
+    const cleanTs = evt.timestamp.trim();
+    const datePart = cleanTs.split(/[\sT]+/)[0];
     if (!datePart) continue;
 
     let y = 0, m = 0, d = 0;
 
     const ymdMatch = datePart.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})/);
-    const dmyMatch = datePart.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})/);
+    const dmyMatch = datePart.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/);
 
     if (ymdMatch) {
       y = parseInt(ymdMatch[1], 10);
       m = parseInt(ymdMatch[2], 10);
       d = parseInt(ymdMatch[3], 10);
     } else if (dmyMatch) {
-      d = parseInt(dmyMatch[1], 10);
-      m = parseInt(dmyMatch[2], 10);
-      y = parseInt(dmyMatch[3], 10);
+      const p1 = parseInt(dmyMatch[1], 10);
+      const p2 = parseInt(dmyMatch[2], 10);
+      const rawY = parseInt(dmyMatch[3], 10);
+      y = rawY < 100 ? (rawY < 50 ? 2000 + rawY : 1900 + rawY) : rawY;
+      if (p1 > 12 && p2 <= 12) {
+        d = p1;
+        m = p2;
+      } else if (p2 > 12 && p1 <= 12) {
+        d = p2;
+        m = p1;
+      } else {
+        d = p1;
+        m = p2;
+      }
+    } else {
+      // Try JS Date parsing
+      const parsed = new Date(cleanTs);
+      if (!isNaN(parsed.getTime())) {
+        y = parsed.getFullYear();
+        m = parsed.getMonth() + 1;
+        d = parsed.getDate();
+      }
     }
+
+    if (y > 2400) y -= 543; // Buddhist Era conversion
 
     if (y > 0 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
       const localDateObj = new Date(y, m - 1, d, 12, 0, 0);

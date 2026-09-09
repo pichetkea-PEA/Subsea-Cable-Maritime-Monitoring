@@ -205,6 +205,30 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
     return parkingZone?.coordinates ? calculatePolygonAreaSqKm(parkingZone.coordinates) : 0;
   }, [parkingZone]);
 
+  const isSamuiRoute = useMemo(() => {
+    return cableRoute.name.toLowerCase().includes('samui') || 
+      (cableRoute.waypoints[0] && Math.abs(cableRoute.waypoints[0].lat - 9.4) < 0.6);
+  }, [cableRoute]);
+
+  const kp0Name = useMemo(() => {
+    return cableRoute.mainlandStation || 
+      (cableRoute.waypoints[0]?.name ? cableRoute.waypoints[0].name.replace(/KP.*$/, '').trim() : 'Shore Terminal');
+  }, [cableRoute]);
+
+  const kpEndName = useMemo(() => {
+    return cableRoute.islandStation || 
+      (cableRoute.waypoints[cableRoute.waypoints.length - 1]?.name ? cableRoute.waypoints[cableRoute.waypoints.length - 1].name.replace(/KP.*$/, '').trim() : 'Island Substation');
+  }, [cableRoute]);
+
+  const kp0Short = useMemo(() => kp0Name.replace(/Terminal|Substation/i, '').trim(), [kp0Name]);
+  const kpEndShort = useMemo(() => kpEndName.replace(/Terminal|Substation/i, '').trim(), [kpEndName]);
+
+  const cableVoltageLabel = useMemo(() => {
+    if (cableRoute.name.includes('22kV') || cableRoute.name.includes('22 kV')) return '22 kV Subsea Cable';
+    if (cableRoute.name.includes('33kV') || cableRoute.name.includes('33 kV')) return '33 kV Subsea Cable';
+    return '115 kV Subsea Cable';
+  }, [cableRoute]);
+
   // Handler for Generating & Downloading Native Vector PDF via jsPDF & autotable
   const handleDownloadPdf = async () => {
     setIsGenerating(true);
@@ -314,6 +338,55 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
 
       const imgToUse = activeHeatmapImage || capturedHeatmapImage || (typeof window !== 'undefined' ? localStorage.getItem('ais_corridor_heatmap_image') : null);
       
+      const isSamuiRoute = cableRoute.name.toLowerCase().includes('samui') || 
+        (cableRoute.waypoints[0] && Math.abs(cableRoute.waypoints[0].lat - 9.4) < 0.6);
+
+      const isSiChangRoute = cableRoute.name.toLowerCase().includes('sichang') ||
+        cableRoute.name.toLowerCase().includes('si chang') ||
+        cableRoute.waypoints.some(wp => Math.abs(wp.lat - 13.16) < 0.25 && Math.abs(wp.lng - 100.86) < 0.25);
+
+      const totalWp = cableRoute.waypoints.length;
+      const kp0 = cableRoute.waypoints[0];
+      const kpEnd = cableRoute.waypoints[totalWp - 1];
+      const isKp0West = kp0 && kpEnd ? kp0.lng <= kpEnd.lng : true;
+
+      let kp0Name = 'Shore Terminal';
+      let kpEndName = 'Island Substation';
+
+      if (isSiChangRoute) {
+        // Koh Si Chang Island is on the WEST (Left, ~100.81°E)
+        // Si Racha Mainland is on the EAST (Right, ~100.92°E)
+        if (isKp0West) {
+          kp0Name = 'Koh Si Chang Island Terminal';
+          kpEndName = 'Si Racha Mainland Terminal';
+        } else {
+          kp0Name = 'Si Racha Mainland Terminal';
+          kpEndName = 'Koh Si Chang Island Terminal';
+        }
+      } else if (isSamuiRoute) {
+        if (isKp0West) {
+          kp0Name = 'Khanom Substation';
+          kpEndName = 'Koh Samui 2 Substation';
+        } else {
+          kp0Name = 'Koh Samui 2 Substation';
+          kpEndName = 'Khanom Substation';
+        }
+      } else {
+        const firstClean = kp0?.name && !kp0.name.startsWith('WP-') ? kp0.name.replace(/KP.*$/, '').trim() : null;
+        const lastClean = kpEnd?.name && !kpEnd.name.startsWith('WP-') ? kpEnd.name.replace(/KP.*$/, '').trim() : null;
+        kp0Name = firstClean || cableRoute.mainlandStation || 'Mainland Shore Terminal';
+        kpEndName = lastClean || cableRoute.islandStation || 'Island Receiving Terminal';
+      }
+
+      const kp0Short = kp0Name.replace(/Terminal|Substation/i, '').trim();
+      const kpEndShort = kpEndName.replace(/Terminal|Substation/i, '').trim();
+
+      const cableVoltage = cableRoute.name.includes('22kV') || cableRoute.name.includes('22 kV')
+        ? '22 kV Subsea Cable'
+        : cableRoute.name.includes('33kV') || cableRoute.name.includes('33 kV')
+        ? '33 kV Subsea Cable'
+        : '115 kV Subsea Cable';
+
       // Draw Left/Center Map Container
       if (imgToUse && imgToUse.startsWith('data:image')) {
         try {
@@ -327,7 +400,7 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
           pdf.setTextColor(255, 255, 255);
           pdf.setFont('helvetica', 'bold');
           pdf.setFontSize(9);
-          pdf.text('Subsea Cable Circuit 3 - Heatmap Map', margin + 6, yPos + 40);
+          pdf.text(`${cableRoute.name} - Heatmap Map`, margin + 6, yPos + 40);
         }
       } else {
         pdf.setFillColor(7, 18, 36);
@@ -335,7 +408,7 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
         pdf.setTextColor(255, 255, 255);
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(9);
-        pdf.text('Subsea Cable Circuit 3 - Thermal Corridor Map', margin + 6, yPos + 40);
+        pdf.text(`${cableRoute.name} - Thermal Corridor Map`, margin + 6, yPos + 40);
       }
 
       // Draw Right Side Legend Panel
@@ -354,36 +427,38 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
 
       let legY = yPos + 14;
 
-      // 1. 115 kV Cable
+      // 1. Cable Line
       pdf.setDrawColor(6, 182, 212);
       pdf.setLineWidth(1.2);
       pdf.line(legendX + 4, legY, legendX + 12, legY);
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(7);
       pdf.setTextColor(15, 23, 42);
-      pdf.text('115 kV Subsea Cable', legendX + 15, legY + 1);
+      pdf.text(cableVoltage, legendX + 15, legY + 1);
       legY += 8;
 
-      // 2. 500m Safety Corridor
+      // 2. Safety Buffer Corridor
       pdf.setDrawColor(245, 158, 11);
       pdf.setLineWidth(0.8);
       pdf.line(legendX + 4, legY, legendX + 12, legY);
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(7);
       pdf.setTextColor(15, 23, 42);
-      pdf.text('500m Safety Buffer', legendX + 15, legY + 1);
+      pdf.text(`${cableRoute.protectionCorridorMeters || 500}m Safety Buffer`, legendX + 15, legY + 1);
       legY += 8;
 
-      // 3. Samui Parking Zone
-      pdf.setFillColor(59, 130, 246, 0.2);
-      pdf.setDrawColor(59, 130, 246);
-      pdf.setLineWidth(0.5);
-      pdf.rect(legendX + 4, legY - 3, 8, 5, 'FD');
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(7);
-      pdf.setTextColor(15, 23, 42);
-      pdf.text('Samui Parking Zone', legendX + 15, legY + 1);
-      legY += 8;
+      // 3. Parking Zone (Only if Koh Samui route)
+      if (isSamuiRoute) {
+        pdf.setFillColor(59, 130, 246, 0.2);
+        pdf.setDrawColor(59, 130, 246);
+        pdf.setLineWidth(0.5);
+        pdf.rect(legendX + 4, legY - 3, 8, 5, 'FD');
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(7);
+        pdf.setTextColor(15, 23, 42);
+        pdf.text('Samui Parking Zone', legendX + 15, legY + 1);
+        legY += 8;
+      }
 
       // 4. Thermal Hotspot Core
       pdf.setFillColor(239, 68, 68);
@@ -394,23 +469,23 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
       pdf.text('Thermal Heat Core', legendX + 15, legY + 1);
       legY += 8;
 
-      // 5. KP 0.0 Khanom Start
+      // 5. KP 0.0 Start Landing
       pdf.setFillColor(56, 189, 248);
       pdf.circle(legendX + 8, legY, 2.2, 'F');
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(7);
       pdf.setTextColor(15, 23, 42);
-      pdf.text('KP 0.0 Khanom Substation', legendX + 15, legY + 1);
+      pdf.text(`KP 0.0: ${kp0Short}`, legendX + 15, legY + 1);
       legY += 8;
 
-      // 6. KP 34.0 Samui End
+      // 6. KP End Landing
       pdf.setFillColor(34, 197, 94);
       pdf.circle(legendX + 8, legY, 2.2, 'F');
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(7);
       pdf.setTextColor(15, 23, 42);
-      pdf.text('KP 34.0 Samui Terminal', legendX + 15, legY + 1);
-      legY += 10;
+      pdf.text(`KP ${cableRoute.totalLengthKm || 'End'}: ${kpEndShort}`, legendX + 15, legY + 1);
+      legY += (isSamuiRoute ? 8 : 11);
 
       // Zones Header in Legend
       pdf.setFont('helvetica', 'bold');
@@ -422,11 +497,28 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
       pdf.setFont('helvetica', 'normal');
       pdf.setFontSize(6.5);
       pdf.setTextColor(15, 23, 42);
-      pdf.text('Zone A: Samui (CRITICAL)', legendX + 4, legY);
-      legY += 4.5;
-      pdf.text('Zone B: Fairway (HIGH)', legendX + 4, legY);
-      legY += 4.5;
-      pdf.text('Zone C: Khanom (MEDIUM)', legendX + 4, legY);
+      if (isSamuiRoute) {
+        pdf.text('Zone A: Samui (CRITICAL)', legendX + 4, legY);
+        legY += 4.5;
+        pdf.text('Zone B: Fairway (HIGH)', legendX + 4, legY);
+        legY += 4.5;
+        pdf.text('Zone C: Khanom (MEDIUM)', legendX + 4, legY);
+      } else if (isSiChangRoute) {
+        // Koh Si Chang Island is Zone A (Left/West), Fairway is Zone B (Center), Si Racha is Zone C (Right/East)
+        pdf.text('Zone A: Koh Si Chang (CRITICAL)', legendX + 4, legY);
+        legY += 4.5;
+        pdf.text('Zone B: Channel Fairway (HIGH)', legendX + 4, legY);
+        legY += 4.5;
+        pdf.text('Zone C: Si Racha (MEDIUM)', legendX + 4, legY);
+      } else {
+        const islandName = (cableRoute.islandStation || kpEndShort).replace(/Terminal|Substation/i, '').trim();
+        const mainlandName = (cableRoute.mainlandStation || kp0Short).replace(/Terminal|Substation/i, '').trim();
+        pdf.text(`Zone A: ${islandName} (CRITICAL)`, legendX + 4, legY);
+        legY += 4.5;
+        pdf.text('Zone B: Fairway (HIGH)', legendX + 4, legY);
+        legY += 4.5;
+        pdf.text(`Zone C: ${mainlandName} (MEDIUM)`, legendX + 4, legY);
+      }
 
       yPos += mapHeight + 4;
 
@@ -434,9 +526,9 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
       pdf.setFont('helvetica', 'italic');
       pdf.setFontSize(7.5);
       pdf.setTextColor(100, 116, 139);
-      pdf.text('Figure 1: High-intensity thermal gradient heatmap highlighting vessel concentration along the 115 kV Koh Samui circuit 3 corridor,', margin, yPos);
+      pdf.text(`Figure 1: High-intensity thermal gradient heatmap highlighting vessel concentration along the ${cableRoute.name} corridor,`, margin, yPos);
       yPos += 3.5;
-      pdf.text('designated 500m safety buffer, and Samui Parking Zone (44.6 km²). Red cores represent high-density repetitive crossings and anchoring hazard clusters.', margin, yPos);
+      pdf.text(`designated ${cableRoute.protectionCorridorMeters || 500}m safety buffer${isSamuiRoute ? `, and Samui Parking Zone (${parkingAreaKm2} km²)` : ''}. Red cores represent high-density repetitive crossings and anchoring hazard clusters.`, margin, yPos);
       yPos += 8;
 
       // Hotspot findings subheading
@@ -449,10 +541,14 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
       // 3 Hotspot boxes side by side
       const boxWidth = (contentWidth - 6) / 3;
       const boxHeight = 42;
-      const hotspots = [
+      const hotspots = isSamuiRoute ? [
         { title: 'Zone A: Samui Coastal Approach', badge: 'CRITICAL', text: 'Dense cluster of passenger ferries and high-speed catamarans approaching Koh Samui pier, adjacent to Samui Parking Zone.' },
         { title: 'Zone B: Deep Channel Fairway', badge: 'HIGH TRAFFIC', text: 'Heavy commercial cargo vessels and oil tankers navigating north-south through central Gulf of Thailand crossing cable axis.' },
         { title: 'Zone C: Khanom Substation', badge: 'MEDIUM HAZARD', text: 'Shallow nearshore approaches characterized by service tugs, port tenders, and local fishing vessels close to shore trench.' },
+      ] : [
+        { title: `Zone A: ${kpEndShort} Approach`, badge: 'CRITICAL', text: `Cluster of vessels, tenders, and maritime transport approaching ${kpEndName} coastal waters.` },
+        { title: 'Zone B: Channel Fairway', badge: 'HIGH TRAFFIC', text: `Commercial cargo traffic and fairway navigation transiting through active subsea cable corridor.` },
+        { title: `Zone C: ${kp0Short} Shore`, badge: 'MEDIUM HAZARD', text: `Nearshore approaches characterized by service tugs, workboats, and coastal craft near landing trench.` },
       ];
 
       hotspots.forEach((h, idx) => {
@@ -658,12 +754,20 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(9);
       pdf.setTextColor(30, 64, 175);
-      pdf.text('Samui Parking Zone Anchorage Compliance Analysis', margin + 4, yPos + 6);
+      pdf.text(
+        isSamuiRoute
+          ? 'Samui Parking Zone Anchorage Compliance Analysis'
+          : `${cableRoute.name} Cable Corridor Anchorage Compliance Analysis`,
+        margin + 4,
+        yPos + 6
+      );
 
       pdf.setFont('helvetica', 'normal');
       pdf.setFontSize(7.5);
       pdf.setTextColor(30, 58, 138);
-      const parkingText = `The designated Samui Parking Zone covers approximately ${parkingAreaKm2 > 0 ? parkingAreaKm2.toFixed(2) : '44.6'} km² north-west of Koh Samui. Analysis confirms strict vessel congregation inside permitted polygon bounds, though 14 commercial vessels decelerated below 1.5 knots within 500m of Koh Samui circuit 3 subsea cable corridor during adverse sea states.`;
+      const parkingText = isSamuiRoute
+        ? `The designated Samui Parking Zone covers approximately ${parkingAreaKm2 > 0 ? parkingAreaKm2.toFixed(2) : '44.6'} km² north-west of Koh Samui. Analysis confirms strict vessel congregation inside permitted polygon bounds, though 14 commercial vessels decelerated below 1.5 knots within 500m of Koh Samui circuit 3 subsea cable corridor during adverse sea states.`
+        : `The designated subsea cable corridor for ${cableRoute.name} spans ${cableRoute.totalLengthKm || 34} km with a ${cableRoute.protectionCorridorMeters || 500}m protective safety buffer. Vessel surveillance indicates regular commercial and passenger crossings between ${kp0Name} and ${kpEndName}. Vessels intending to anchor must strictly avoid the subsea cable corridor.`;
       const splitParking = pdf.splitTextToSize(parkingText, contentWidth - 8);
       pdf.text(splitParking, margin + 4, yPos + 12);
 
@@ -677,9 +781,9 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
       yPos += 5;
 
       const recs = [
-        { title: '1. Automated AIS Warning Broadcasts', desc: 'Maintain real-time automated VHF/AIS text warnings to any vessel decelerating below 1.5 knots within 500m of the cable axis.' },
-        { title: '2. Priority Patrol Boat Interception', desc: 'Dispatch Marine Police patrol crafts immediately upon detection of critical anchoring threats (<100m proximity) in Zone A.' },
-        { title: '3. Ferry Operator Route Coordination', desc: 'Engage Ro-Pax passenger ferry and high-speed catamaran operators to establish designated fairway crossing angles.' },
+        { title: '1. Automated AIS Warning Broadcasts', desc: `Maintain real-time automated VHF/AIS text warnings to any vessel decelerating below 1.5 knots within ${cableRoute.protectionCorridorMeters || 500}m of the cable axis.` },
+        { title: '2. Priority Patrol Boat Interception', desc: `Dispatch Marine Police patrol crafts immediately upon detection of critical anchoring threats (<100m proximity) in Zone A (${isSamuiRoute ? 'Samui Coastal Approach' : `${kpEndShort} Approach`}).` },
+        { title: '3. Ferry Operator Route Coordination', desc: 'Engage ferry and maritime vessel operators to establish designated fairway crossing angles.' },
         { title: '4. Acoustic Cable Depth Verification', desc: 'Schedule periodic multibeam sonar surveys across High-Traffic Fairway (Zone B) to confirm subsea cable burial depth.' },
       ];
 
@@ -982,7 +1086,9 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
                         <Layers className="w-3.5 h-3.5 text-blue-600" />
                         <span>Map & Corridor Legend</span>
                       </div>
-                      <span className="text-[10px] font-mono font-semibold text-slate-500">KP 0 - 34</span>
+                      <span className="text-[10px] font-mono font-semibold text-slate-500">
+                        KP 0 - {cableRoute.totalLengthKm || 34}
+                      </span>
                     </div>
 
                     {/* Legend Items List */}
@@ -990,7 +1096,7 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
                       <div className="flex items-start gap-2">
                         <span className="w-4 h-1.5 bg-cyan-500 rounded-sm mt-1 shrink-0"></span>
                         <div>
-                          <span className="font-bold text-slate-900 block leading-tight">115 kV Subsea Cable</span>
+                          <span className="font-bold text-slate-900 block leading-tight">{cableVoltageLabel}</span>
                           <span className="text-[9.5px] text-slate-500 leading-tight">Active submarine power line</span>
                         </div>
                       </div>
@@ -998,18 +1104,20 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
                       <div className="flex items-start gap-2">
                         <span className="w-4 h-1.5 border border-dashed border-amber-500 bg-amber-400/30 rounded-sm mt-1 shrink-0"></span>
                         <div>
-                          <span className="font-bold text-slate-900 block leading-tight">500m Safety Buffer</span>
+                          <span className="font-bold text-slate-900 block leading-tight">{cableRoute.protectionCorridorMeters || 500}m Safety Buffer</span>
                           <span className="text-[9.5px] text-slate-500 leading-tight">Protection corridor</span>
                         </div>
                       </div>
 
-                      <div className="flex items-start gap-2">
-                        <span className="w-4 h-2.5 border border-dashed border-blue-500 bg-blue-500/20 rounded-sm mt-0.5 shrink-0"></span>
-                        <div>
-                          <span className="font-bold text-slate-900 block leading-tight">Samui Parking Zone</span>
-                          <span className="text-[9.5px] text-slate-500 leading-tight">44.6 km² vessel anchorage</span>
+                      {isSamuiRoute && (
+                        <div className="flex items-start gap-2">
+                          <span className="w-4 h-2.5 border border-dashed border-blue-500 bg-blue-500/20 rounded-sm mt-0.5 shrink-0"></span>
+                          <div>
+                            <span className="font-bold text-slate-900 block leading-tight">Samui Parking Zone</span>
+                            <span className="text-[9.5px] text-slate-500 leading-tight">44.6 km² vessel anchorage</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <div className="flex items-start gap-2">
                         <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-rose-500 via-amber-500 to-transparent mt-0.5 shrink-0 shadow-xs"></span>
@@ -1022,16 +1130,16 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
                       <div className="flex items-start gap-2">
                         <span className="w-3 h-3 rounded-full bg-sky-400 border-2 border-white mt-0.5 shrink-0 shadow-xs"></span>
                         <div>
-                          <span className="font-bold text-slate-900 block leading-tight">Khanom Substation</span>
-                          <span className="text-[9.5px] text-slate-500 leading-tight">KP 0.0 • Mainland landing</span>
+                          <span className="font-bold text-slate-900 block leading-tight">{kp0Name}</span>
+                          <span className="text-[9.5px] text-slate-500 leading-tight">KP 0.0 • Shore landing</span>
                         </div>
                       </div>
 
                       <div className="flex items-start gap-2">
                         <span className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-white mt-0.5 shrink-0 shadow-xs"></span>
                         <div>
-                          <span className="font-bold text-slate-900 block leading-tight">Koh Samui 2 Substation</span>
-                          <span className="text-[9.5px] text-slate-500 leading-tight">KP 34.0 • Island landing</span>
+                          <span className="font-bold text-slate-900 block leading-tight">{kpEndName}</span>
+                          <span className="text-[9.5px] text-slate-500 leading-tight">KP {cableRoute.totalLengthKm || 'End'} • Island landing</span>
                         </div>
                       </div>
                     </div>
@@ -1040,23 +1148,42 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
                   {/* Hotspot Classification Summary */}
                   <div className="pt-2 border-t border-slate-200 space-y-1 text-[10px]">
                     <div className="font-bold text-slate-800 text-[9.5px] uppercase">Surveillance Zones</div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">Zone A (Samui Approach)</span>
-                      <span className="font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">CRITICAL</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">Zone B (Fairway Channel)</span>
-                      <span className="font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">HIGH</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">Zone C (Khanom Shore)</span>
-                      <span className="font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">MEDIUM</span>
-                    </div>
+                    {isSamuiRoute ? (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">Zone A (Samui Approach)</span>
+                          <span className="font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">CRITICAL</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">Zone B (Fairway Channel)</span>
+                          <span className="font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">HIGH</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">Zone C (Khanom Shore)</span>
+                          <span className="font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">MEDIUM</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">Zone A ({kpEndShort} Approach)</span>
+                          <span className="font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">CRITICAL</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">Zone B (Fairway Channel)</span>
+                          <span className="font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">HIGH</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-600">Zone C ({kp0Short} Shore)</span>
+                          <span className="font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">MEDIUM</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
               <p className="text-[10px] text-slate-500 italic mt-4 pt-1">
-                *Figure 1: High-intensity thermal gradient heatmap highlighting vessel concentration along the {cableRoute.name} corridor, designated 500m safety buffer, and Samui Parking Zone ({parkingAreaKm2} km²). Red cores represent high-density repetitive crossings and anchoring hazard clusters.
+                *Figure 1: High-intensity thermal gradient heatmap highlighting vessel concentration along the {cableRoute.name} corridor, designated {cableRoute.protectionCorridorMeters || 500}m safety buffer{isSamuiRoute ? `, and Samui Parking Zone (${parkingAreaKm2} km²)` : ''}. Red cores represent high-density repetitive crossings and anchoring hazard clusters.
               </p>
             </div>
 
@@ -1067,33 +1194,67 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
                 <span>Corridor High-Traffic Hotspot Zone Findings</span>
               </h4>
               <div className="grid grid-cols-3 gap-3 text-xs">
-                <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
-                  <div className="font-bold text-slate-900 flex items-center justify-between">
-                    <span>Zone A: Samui Coastal Approach</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded text-rose-800 font-bold" style={{ backgroundColor: '#ffe4e6' }}>CRITICAL</span>
-                  </div>
-                  <p className="text-[10px] text-slate-600 leading-tight">
-                    Dense cluster of passenger ferries and high-speed catamarans approaching Koh Samui pier, adjacent to the designated Samui Parking Zone.
-                  </p>
-                </div>
-                <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
-                  <div className="font-bold text-slate-900 flex items-center justify-between">
-                    <span>Zone B: Deep Channel Fairway</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded text-amber-800 font-bold" style={{ backgroundColor: '#fef3c7' }}>HIGH TRAFFIC</span>
-                  </div>
-                  <p className="text-[10px] text-slate-600 leading-tight">
-                    Heavy commercial cargo vessels and oil tankers navigating north-south through the central Gulf of Thailand crossing cable axis.
-                  </p>
-                </div>
-                <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
-                  <div className="font-bold text-slate-900 flex items-center justify-between">
-                    <span>Zone C: Khanom Substation Nearshore</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded text-blue-800 font-bold" style={{ backgroundColor: '#dbeafe' }}>MEDIUM HAZARD</span>
-                  </div>
-                  <p className="text-[10px] text-slate-600 leading-tight">
-                    Shallow nearshore approaches characterized by service tugs, port tenders, and local fishing vessels in close proximity to shore trench.
-                  </p>
-                </div>
+                {isSamuiRoute ? (
+                  <>
+                    <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
+                      <div className="font-bold text-slate-900 flex items-center justify-between">
+                        <span>Zone A: Samui Coastal Approach</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded text-rose-800 font-bold" style={{ backgroundColor: '#ffe4e6' }}>CRITICAL</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 leading-tight">
+                        Dense cluster of passenger ferries and high-speed catamarans approaching Koh Samui pier, adjacent to the designated Samui Parking Zone.
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
+                      <div className="font-bold text-slate-900 flex items-center justify-between">
+                        <span>Zone B: Deep Channel Fairway</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded text-amber-800 font-bold" style={{ backgroundColor: '#fef3c7' }}>HIGH TRAFFIC</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 leading-tight">
+                        Heavy commercial cargo vessels and oil tankers navigating north-south through the central Gulf of Thailand crossing cable axis.
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
+                      <div className="font-bold text-slate-900 flex items-center justify-between">
+                        <span>Zone C: Khanom Substation Nearshore</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded text-blue-800 font-bold" style={{ backgroundColor: '#dbeafe' }}>MEDIUM HAZARD</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 leading-tight">
+                        Shallow nearshore approaches characterized by service tugs, port tenders, and local fishing vessels in close proximity to shore trench.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
+                      <div className="font-bold text-slate-900 flex items-center justify-between">
+                        <span>Zone A: {kpEndShort} Approach</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded text-rose-800 font-bold" style={{ backgroundColor: '#ffe4e6' }}>CRITICAL</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 leading-tight">
+                        Cluster of vessels, tenders, and maritime transport approaching {kpEndName} coastal waters.
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
+                      <div className="font-bold text-slate-900 flex items-center justify-between">
+                        <span>Zone B: Channel Fairway</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded text-amber-800 font-bold" style={{ backgroundColor: '#fef3c7' }}>HIGH TRAFFIC</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 leading-tight">
+                        Commercial cargo traffic and fairway navigation transiting through active subsea cable corridor.
+                      </p>
+                    </div>
+                    <div className="p-2.5 rounded-xl border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
+                      <div className="font-bold text-slate-900 flex items-center justify-between">
+                        <span>Zone C: {kp0Short} Shore</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded text-blue-800 font-bold" style={{ backgroundColor: '#dbeafe' }}>MEDIUM HAZARD</span>
+                      </div>
+                      <p className="text-[10px] text-slate-600 leading-tight">
+                        Nearshore approaches characterized by service craft, workboats, and coastal craft near landing trench.
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1318,19 +1479,31 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
               </div>
             </div>
 
-            {/* Samui Parking Zone Anchorage Compliance Analysis */}
+            {/* Anchorage Compliance Analysis */}
             <div className="p-4 rounded-xl border border-blue-200 space-y-2 text-xs" style={{ backgroundColor: '#eff6ff' }}>
               <div className="flex items-center justify-between">
                 <div className="font-bold text-blue-900 text-sm flex items-center gap-1.5">
                   <Anchor className="w-4 h-4 text-blue-700" />
-                  <span>Samui Vessel Parking Zone Compliance Status</span>
+                  <span>
+                    {isSamuiRoute
+                      ? 'Samui Vessel Parking Zone Compliance Status'
+                      : `${cableRoute.name} Cable Corridor Anchorage Compliance`}
+                  </span>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold text-blue-900" style={{ backgroundColor: '#bfdbfe' }}>
-                  Permanent Surveillance Polygon
+                  {isSamuiRoute ? 'Permanent Surveillance Polygon' : 'Corridor Protection Zone'}
                 </span>
               </div>
               <p className="text-slate-700 leading-relaxed">
-                The designated <strong>Samui Parking Zone</strong> encompasses an approximate area of <strong>{parkingAreaKm2} km²</strong> defined by 4 permanent boundary coordinates (Point 1: 9.523328, 99.903333; Point 2: 9.523330, 99.866663; Point 3: 9.566659, 99.866663; Point 4: 9.566662, 99.879994). Vessels exceeding 1,000 GT intending to drop anchor or drift must be strictly routed inside this polygon to eliminate anchor dragging risk against the 115 kV Koh Samui circuit 3 corridor.
+                {isSamuiRoute ? (
+                  <>
+                    The designated <strong>Samui Parking Zone</strong> encompasses an approximate area of <strong>{parkingAreaKm2} km²</strong> defined by 4 permanent boundary coordinates (Point 1: 9.523328, 99.903333; Point 2: 9.523330, 99.866663; Point 3: 9.566659, 99.866663; Point 4: 9.566662, 99.879994). Vessels exceeding 1,000 GT intending to drop anchor or drift must be strictly routed inside this polygon to eliminate anchor dragging risk against the 115 kV Koh Samui circuit 3 corridor.
+                  </>
+                ) : (
+                  <>
+                    The designated subsea cable corridor for <strong>{cableRoute.name}</strong> spans <strong>{cableRoute.totalLengthKm || 34} km</strong> with a <strong>{cableRoute.protectionCorridorMeters || 500}m</strong> protective safety buffer between <strong>{kp0Name}</strong> and <strong>{kpEndName}</strong>. Vessels intending to drop anchor or drift must strictly avoid the subsea cable corridor to eliminate bottom gear and anchor dragging hazards.
+                  </>
+                )}
               </p>
             </div>
 
@@ -1344,13 +1517,13 @@ export const PdfSummaryReportModal: React.FC<PdfSummaryReportModalProps> = ({
                 <div className="p-3 rounded-lg border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
                   <div className="font-bold text-slate-900">1. Automated AIS Warning Broadcasts</div>
                   <p className="text-[11px] text-slate-600">
-                    Maintain real-time automated VHF/AIS text warnings to any vessel decelerating below 1.5 knots within 500m of the cable axis, advising immediate relocation to Samui Parking Zone.
+                    Maintain real-time automated VHF/AIS text warnings to any vessel decelerating below 1.5 knots within {cableRoute.protectionCorridorMeters || 500}m of the cable axis.
                   </p>
                 </div>
                 <div className="p-3 rounded-lg border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
                   <div className="font-bold text-slate-900">2. Priority Patrol Boat Interception</div>
                   <p className="text-[11px] text-slate-600">
-                    Dispatch Marine Police / Harbour Master patrol crafts immediately upon detection of critical anchoring threats (&lt;100m proximity) in Zone A (Samui Coastal Approach).
+                    Dispatch Marine Police / Harbour Master patrol crafts immediately upon detection of critical anchoring threats (&lt;100m proximity) in Zone A ({isSamuiRoute ? 'Samui Coastal Approach' : `${kpEndShort} Approach`}).
                   </p>
                 </div>
                 <div className="p-3 rounded-lg border border-slate-200 space-y-1" style={{ backgroundColor: '#f8fafc' }}>
