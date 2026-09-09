@@ -125,6 +125,17 @@ export default function App() {
   const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
+  // Handler to update alarm events and sync both locally and to Firestore
+  const handleUpdateAlarmEvents = (newEvents: AlarmEvent[]) => {
+    setEvents(newEvents);
+    try {
+      localStorage.setItem('subsea_alarm_events', JSON.stringify(newEvents));
+    } catch (e) {
+      console.warn('LocalStorage error:', e);
+    }
+    saveAlarmEventsToFirestore(newEvents).catch(err => console.warn('Firestore sync events:', err));
+  };
+
   // Load default cable route and alarm events on app mount
   useEffect(() => {
     const initDefaultFiles = async () => {
@@ -144,12 +155,12 @@ export default function App() {
             localStorage.setItem('subsea_active_cable_route', JSON.stringify(parsedRoute));
           }
 
-          const eventsRes = await fetch('/Default Alarm Event.csv');
-          if (eventsRes.ok) {
-            const eventsText = await eventsRes.text();
-            const parsedEvents = parseAlarmEventsCSV(eventsText, parsedRoute.waypoints);
-            const savedEvents = localStorage.getItem('subsea_alarm_events');
-            if (!savedEvents) {
+          const savedEvents = localStorage.getItem('subsea_alarm_events');
+          if (!savedEvents) {
+            const eventsRes = await fetch('/Default Alarm Event.csv');
+            if (eventsRes.ok) {
+              const eventsText = await eventsRes.text();
+              const parsedEvents = parseAlarmEventsCSV(eventsText, parsedRoute.waypoints);
               setEvents(parsedEvents);
               localStorage.setItem('subsea_alarm_events', JSON.stringify(parsedEvents));
             }
@@ -192,9 +203,14 @@ export default function App() {
           setCableRoute(active);
         }
 
-        const cloudEvents = await getAlarmEventsFromFirestore();
-        if (cloudEvents.length > 0) {
-          setEvents(cloudEvents);
+        const savedEvents = localStorage.getItem('subsea_alarm_events');
+        // Only load cloud events if local storage has no user data
+        if (!savedEvents) {
+          const cloudEvents = await getAlarmEventsFromFirestore();
+          if (cloudEvents.length > 0) {
+            setEvents(cloudEvents);
+            localStorage.setItem('subsea_alarm_events', JSON.stringify(cloudEvents));
+          }
         }
       } catch (e) {
         console.warn('Firestore load notice:', e);
@@ -212,7 +228,7 @@ export default function App() {
       localStorage.setItem('subsea_is_authenticated', 'true');
       localStorage.setItem('subsea_user_profile', JSON.stringify(user));
 
-      // Automatically load default cable route (115 kV Koh Samui circuit 3) and Default Alarm Event csv after login
+      // Automatically load default cable route (115 kV Koh Samui circuit 3)
       const routeRes = await fetch('/Lat long of circuit 3.txt');
       if (routeRes.ok) {
         const routeText = await routeRes.text();
@@ -221,17 +237,18 @@ export default function App() {
         parsedRoute.isDefault = true;
         setCableRoute(parsedRoute);
         localStorage.setItem('subsea_active_cable_route', JSON.stringify(parsedRoute));
-        // Save to Firestore
         saveCableRouteToFirestore(parsedRoute).catch(err => console.warn('Firestore sync route:', err));
 
-        const eventsRes = await fetch('/Default Alarm Event.csv');
-        if (eventsRes.ok) {
-          const eventsText = await eventsRes.text();
-          const parsedEvents = parseAlarmEventsCSV(eventsText, parsedRoute.waypoints);
-          setEvents(parsedEvents);
-          localStorage.setItem('subsea_alarm_events', JSON.stringify(parsedEvents));
-          // Save to Firestore
-          saveAlarmEventsToFirestore(parsedEvents).catch(err => console.warn('Firestore sync events:', err));
+        const savedEvents = localStorage.getItem('subsea_alarm_events');
+        if (!savedEvents) {
+          const eventsRes = await fetch('/Default Alarm Event.csv');
+          if (eventsRes.ok) {
+            const eventsText = await eventsRes.text();
+            const parsedEvents = parseAlarmEventsCSV(eventsText, parsedRoute.waypoints);
+            setEvents(parsedEvents);
+            localStorage.setItem('subsea_alarm_events', JSON.stringify(parsedEvents));
+            saveAlarmEventsToFirestore(parsedEvents).catch(err => console.warn('Firestore sync events:', err));
+          }
         }
       }
     } catch (e) {
@@ -351,7 +368,7 @@ export default function App() {
               setActiveTab('dashboard');
             }}
             onUpdateCableRoute={handleUpdateCableRoute}
-            onUpdateAlarmEvents={setEvents}
+            onUpdateAlarmEvents={handleUpdateAlarmEvents}
           />
         )}
 
@@ -364,7 +381,7 @@ export default function App() {
               events={events}
               eventsCount={events.length}
               historicalCount={historicalData.length}
-              onUpdateAlarmEvents={setEvents}
+              onUpdateAlarmEvents={handleUpdateAlarmEvents}
               onUpdateHistoricalData={setHistoricalData}
               onOpenDataModal={() => setIsDataModalOpen(true)}
             />
@@ -433,7 +450,7 @@ export default function App() {
         cableRoute={cableRoute}
         events={events}
         onUpdateCableRoute={handleUpdateCableRoute}
-        onUpdateAlarmEvents={setEvents}
+        onUpdateAlarmEvents={handleUpdateAlarmEvents}
         onUpdateHistoricalData={setHistoricalData}
       />
 
