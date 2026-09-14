@@ -528,9 +528,9 @@ export const EventSummaryPanel: React.FC<EventSummaryPanelProps> = ({
                   <span className="text-slate-400 font-medium">Corridor Threat Level:</span>
                   <span
                     className={`font-bold px-2 py-0.5 rounded text-[11px] uppercase border ${
-                      aiResult.threatLevel === 'Critical'
+                      aiResult.threatLevel === 'CRITICAL'
                         ? 'bg-rose-950 text-rose-300 border-rose-700'
-                        : aiResult.threatLevel === 'High'
+                        : aiResult.threatLevel === 'HIGH'
                         ? 'bg-amber-950 text-amber-300 border-amber-700'
                         : 'bg-blue-950 text-blue-300 border-blue-700'
                     }`}
@@ -543,19 +543,19 @@ export const EventSummaryPanel: React.FC<EventSummaryPanelProps> = ({
                 <div className="bg-slate-950/80 p-3 rounded-lg border border-slate-800 space-y-1">
                   <span className="font-bold text-slate-200 block">Executive Assessment:</span>
                   <p className="text-slate-300 leading-relaxed text-[11px]">
-                    {aiResult.summaryText}
+                    {aiResult.executiveBrief}
                   </p>
                 </div>
 
                 {/* Key Risk Factors */}
-                {aiResult.riskFactors && aiResult.riskFactors.length > 0 && (
+                {aiResult.keyThreats && aiResult.keyThreats.length > 0 && (
                   <div className="bg-slate-950/80 p-3 rounded-lg border border-slate-800 space-y-1.5">
                     <span className="font-bold text-amber-300 flex items-center gap-1">
                       <AlertTriangle className="w-3.5 h-3.5" />
                       Identified Vulnerabilities:
                     </span>
                     <ul className="space-y-1 text-[11px] text-slate-300 list-disc list-inside">
-                      {aiResult.riskFactors.map((rf, idx) => (
+                      {aiResult.keyThreats.map((rf, idx) => (
                         <li key={idx}>{rf}</li>
                       ))}
                     </ul>

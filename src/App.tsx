@@ -10,9 +10,11 @@ import { MapChart } from './components/MapChart';
 import { EventSummaryPanel } from './components/EventSummaryPanel';
 import { EventLogTable } from './components/EventLogTable';
 import { StatisticalAnalysisPage } from './components/StatisticalAnalysisPage';
+import { ShipTrackSummaryPage } from './components/ShipTrackSummaryPage';
 import { DataManagementModal } from './components/DataManagementModal';
 import { CableRouteModal } from './components/CableRouteModal';
 import { AuthModal } from './components/AuthModal';
+import { DashboardTransitionLoading } from './components/DashboardTransitionLoading';
 import { initAuth } from './lib/firebase';
 import { saveCableRouteToFirestore, getCableRoutesFromFirestore, saveAlarmEventsToFirestore, getAlarmEventsFromFirestore } from './utils/firebaseUtils';
 
@@ -106,8 +108,15 @@ export default function App() {
     localStorage.setItem('subsea_permanent_parking_zone', JSON.stringify(newZone));
   };
 
-  // UI States - Land directly on 'map' (monitoring page) after login
-  const [activeTab, setActiveTab] = useState<NavigationTab>('map');
+  // UI States - Land on 'setup' if route not confirmed yet, or 'dashboard' if already confirmed
+  const [activeTab, setActiveTab] = useState<NavigationTab>(() => {
+    try {
+      const isConfirmed = localStorage.getItem('subsea_user_confirmed_route') === 'true';
+      return isConfirmed ? 'dashboard' : 'setup';
+    } catch {
+      return 'setup';
+    }
+  });
   const [selectedEvent, setSelectedEvent] = useState<AlarmEvent | null>(null);
   const [hoveredMMSI, setHoveredMMSI] = useState<string | null>(null);
   const [selectedFilterType, setSelectedFilterType] = useState<'All' | 'Alarm' | 'Alert'>('All');
@@ -124,15 +133,13 @@ export default function App() {
   const [isDataModalOpen, setIsDataModalOpen] = useState(false);
   const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isTransitioningToDashboard, setIsTransitioningToDashboard] = useState(false);
+  const [pendingDashboardRoute, setPendingDashboardRoute] = useState<CableRoute | null>(null);
 
   // In-memory ref flag to strictly lock datasets once user confirms route on Page 1
-  const userConfirmedRef = useRef<boolean>(() => {
-    try {
-      return localStorage.getItem('subsea_user_confirmed_route') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const userConfirmedRef = useRef<boolean>(
+    typeof window !== 'undefined' && localStorage.getItem('subsea_user_confirmed_route') === 'true'
+  );
 
   // Handler to update alarm events and sync both locally and to Firestore
   const handleUpdateAlarmEvents = (newEvents: AlarmEvent[]) => {
@@ -378,6 +385,7 @@ export default function App() {
         currentUser={currentUser}
         alarmCount={alarmCount}
         alertCount={alertCount}
+        hasConfirmedRoute={userConfirmedRef.current}
       />
 
       {/* Main View Area */}
@@ -400,7 +408,9 @@ export default function App() {
               } catch (e) {
                 console.warn('LocalStorage save error:', e);
               }
-              setActiveTab('dashboard');
+              // Show loading screen before entering Page 2 (dashboard map)
+              setPendingDashboardRoute(newRoute);
+              setIsTransitioningToDashboard(true);
             }}
             onUpdateCableRoute={handleUpdateCableRoute}
             onUpdateAlarmEvents={handleUpdateAlarmEvents}
@@ -476,6 +486,11 @@ export default function App() {
             onImageCaptured={setCapturedHeatmapImage}
           />
         )}
+
+        {/* STEP 4: Ship Track Summary */}
+        {activeTab === 'shiptrack' && (
+          <ShipTrackSummaryPage cableRoute={cableRoute} />
+        )}
       </main>
 
       {/* Modals */}
@@ -505,6 +520,17 @@ export default function App() {
         onUpdateUser={setCurrentUser}
         onLogout={handleLogout}
       />
+
+      {/* Loading Screen before entering Page 2 (Dashboard Map) */}
+      {isTransitioningToDashboard && (
+        <DashboardTransitionLoading
+          routeName={pendingDashboardRoute?.name || cableRoute?.name}
+          onComplete={() => {
+            setIsTransitioningToDashboard(false);
+            setActiveTab('dashboard');
+          }}
+        />
+      )}
     </div>
   );
 }

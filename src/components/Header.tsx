@@ -1,8 +1,8 @@
 import React from 'react';
-import { Anchor, Shield, Radio, Activity, UploadCloud, BarChart3, Database, User, Compass, LogOut } from 'lucide-react';
+import { Anchor, Shield, Radio, Activity, UploadCloud, BarChart3, Database, User, Compass, LogOut, Route } from 'lucide-react';
 import { CableRoute, UserProfile } from '../types';
 
-export type NavigationTab = 'setup' | 'dashboard' | 'statistics';
+export type NavigationTab = 'setup' | 'dashboard' | 'statistics' | 'shiptrack';
 
 interface HeaderProps {
   activeTab: NavigationTab;
@@ -15,6 +15,7 @@ interface HeaderProps {
   currentUser: UserProfile;
   alarmCount: number;
   alertCount: number;
+  hasConfirmedRoute?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,6 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser,
   alarmCount,
   alertCount,
+  hasConfirmedRoute,
 }) => {
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white px-4 py-2.5 select-none sticky top-0 z-40">
@@ -53,56 +55,61 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
               <span className="text-slate-600">•</span>
               <span className="text-slate-400">500m Safety Corridor</span>
-              <button
-                id="btn-change-cable-route"
-                onClick={() => setActiveTab('setup')}
-                className="text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 underline underline-offset-2 ml-1 cursor-pointer"
-              >
-                Change Trace / Setup
-              </button>
+              {activeTab !== 'setup' && (
+                <button
+                  id="btn-change-cable-route"
+                  onClick={() => setActiveTab('setup')}
+                  className="text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 underline underline-offset-2 ml-1 cursor-pointer"
+                >
+                  Change Trace / Setup
+                </button>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Center: Navigation Tabs */}
-        <nav className="flex items-center bg-slate-950/80 p-1 rounded-lg border border-slate-800/80 text-xs font-medium">
-          <button
-            id="nav-tab-setup"
-            onClick={() => setActiveTab('setup')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-              activeTab === 'setup'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span>1. Cable Trace & Data Setup</span>
-          </button>
-          <button
-            id="nav-tab-dashboard"
-            onClick={() => setActiveTab('dashboard')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-              activeTab === 'dashboard'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Compass className="w-3.5 h-3.5" />
-            <span>2. Dashboard Map</span>
-          </button>
-          <button
-            id="nav-tab-statistics"
-            onClick={() => setActiveTab('statistics')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-              activeTab === 'statistics'
-                ? 'bg-blue-600 text-white font-semibold shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>3. Statistical Analysis</span>
-          </button>
-        </nav>
+        {/* Center: Navigation Tabs (Completely removed on Page 1 / setup to prevent user clicking to other pages before uploading CSV) */}
+        {activeTab !== 'setup' && (
+          <nav className="flex items-center bg-slate-950/80 p-1 rounded-lg border border-slate-800/80 text-xs font-medium shadow-inner">
+            <button
+              id="nav-tab-dashboard"
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                activeTab === 'dashboard'
+                  ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>2. Dashboard Map</span>
+            </button>
+            <button
+              id="nav-tab-statistics"
+              onClick={() => setActiveTab('statistics')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                activeTab === 'statistics'
+                  ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>3. Statistical Analysis</span>
+            </button>
+            <button
+              id="nav-tab-shiptrack"
+              onClick={() => setActiveTab('shiptrack')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                activeTab === 'shiptrack'
+                  ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <Route className="w-3.5 h-3.5" />
+              <span>4. Ship Track Summary</span>
+            </button>
+          </nav>
+        )}
+
 
         {/* Right: Quick Counts & User Profile */}
         <div className="flex items-center gap-3">

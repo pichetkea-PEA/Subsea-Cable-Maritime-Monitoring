@@ -73,6 +73,7 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
   const [sheetTabName, setSheetTabName] = useState('Sheet1');
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
+  const [isProceeding, setIsProceeding] = useState(false);
 
   // Load default preset ONLY if there is no currentRoute configured
   React.useEffect(() => {
@@ -228,7 +229,7 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
   const handleProceed = () => {
     const valid = handleParseCableInput(cableCoordsText, routeName);
     if (!valid) return;
-    
+    setIsProceeding(true);
     let finalEvents = currentUploadedEvents.length > 0 ? currentUploadedEvents : events;
     if (rawAlarmCsvText) {
       try {
@@ -308,10 +309,20 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
           <button
             id="btn-proceed-to-dashboard-top"
             onClick={handleProceed}
-            className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-sm shadow-lg shadow-blue-500/25 transition cursor-pointer transform hover:-translate-y-0.5 shrink-0"
+            disabled={isProceeding}
+            className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-60 text-white font-bold text-sm shadow-lg shadow-blue-500/25 transition cursor-pointer transform hover:-translate-y-0.5 shrink-0"
           >
-            <span>Proceed to Dashboard Map</span>
-            <ArrowRight className="w-4 h-4" />
+            {isProceeding ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Initializing Dashboard...</span>
+              </>
+            ) : (
+              <>
+                <span>Proceed to Dashboard Map</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </div>
 
@@ -669,10 +680,20 @@ export const CableSetupFirstPage: React.FC<CableSetupFirstPageProps> = ({
           <button
             id="btn-confirm-and-enter-dashboard"
             onClick={handleProceed}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-bold text-base shadow-xl shadow-blue-500/25 flex items-center justify-center gap-2.5 transition cursor-pointer transform hover:-translate-y-0.5"
+            disabled={isProceeding}
+            className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 disabled:opacity-60 text-white font-bold text-base shadow-xl shadow-blue-500/25 flex items-center justify-center gap-2.5 transition cursor-pointer transform hover:-translate-y-0.5"
           >
-            <span>Confirm Cable Route & Enter Dashboard Map</span>
-            <ArrowRight className="w-5 h-5" />
+            {isProceeding ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Initializing Dashboard Map & Corridor Calculations...</span>
+              </>
+            ) : (
+              <>
+                <span>Confirm Cable Route & Enter Dashboard Map</span>
+                <ArrowRight className="w-5 h-5" />
+              </>
+            )}
           </button>
         </div>
       </div>

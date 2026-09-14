@@ -120,3 +120,48 @@ export interface AIAnalysisResult {
     risk: string;
   }[];
 }
+
+export type ShipDotColor = 'red' | 'green' | 'orange' | 'yellow';
+
+export interface ShipTrackPoint {
+  id: string;
+  timestamp: string; // Raw or normalized timestamp
+  localTimeStr: string; // Formatted display for local time
+  lat: number;
+  lng: number;
+  sog: number; // Speed over ground in knots
+  cog?: number; // Course over ground in degrees
+  status: string; // Status from CSV, e.g. "At Anchor", "Under way using engine"
+  isInsideCableZone: boolean;
+  distanceToCableMeters: number;
+  dotColor: ShipDotColor;
+  dotCategory: string;
+}
+
+export interface ShipParticulars {
+  mmsi: string;
+  imo: string;
+  name: string;
+  callSign: string;
+  shipType: string;
+  dimension: string; // e.g., "118.5m × 19.2m"
+  flag: string;
+}
+
+export interface ShipTrackSummaryData {
+  ship: ShipParticulars;
+  points: ShipTrackPoint[];
+  totalPoints: number;
+  anchoringCount: number; // How many times the ship was anchoring
+  cableZoneEnterCount: number; // How many times the ship entered the cable zone
+  pointsInCableZoneCount: number;
+  pointsAnchoringCount: number;
+  minSog: number;
+  maxSog: number;
+  avgSog: number;
+  minDistanceToCableMeters: number;
+  startTime: string;
+  endTime: string;
+  durationFormatted: string;
+}
+
