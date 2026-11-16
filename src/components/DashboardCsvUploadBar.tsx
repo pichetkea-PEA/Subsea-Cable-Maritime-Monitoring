@@ -15,6 +15,8 @@ import {
   ChevronUp,
   FileCheck,
   Calendar,
+  Minimize2,
+  Maximize2,
 } from 'lucide-react';
 
 interface DashboardCsvUploadBarProps {
@@ -25,6 +27,8 @@ interface DashboardCsvUploadBarProps {
   onUpdateAlarmEvents: (events: AlarmEvent[]) => void;
   onUpdateHistoricalData: (data: HistoricalShipSummary[]) => void;
   onOpenDataModal: () => void;
+  isMinimized?: boolean;
+  onToggleMinimize?: () => void;
 }
 
 export const DashboardCsvUploadBar: React.FC<DashboardCsvUploadBarProps> = ({
@@ -35,6 +39,8 @@ export const DashboardCsvUploadBar: React.FC<DashboardCsvUploadBarProps> = ({
   onUpdateAlarmEvents,
   onUpdateHistoricalData,
   onOpenDataModal,
+  isMinimized = false,
+  onToggleMinimize,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [lastActionStatus, setLastActionStatus] = useState<string | null>(null);
@@ -87,6 +93,35 @@ export const DashboardCsvUploadBar: React.FC<DashboardCsvUploadBarProps> = ({
     };
     reader.readAsText(file);
   };
+
+  if (isMinimized) {
+    return (
+      <div className="bg-slate-900/90 border border-slate-800/90 rounded-lg px-3 py-1.5 shadow-sm backdrop-blur-sm flex items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2 flex-wrap">
+          <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="font-bold text-slate-200">CSV Data Management</span>
+          <span className="text-slate-600">|</span>
+          <span className="text-[11px] text-slate-400">
+            Period: <strong className="text-slate-200 font-mono">{dateRange.startDate}</strong> – <strong className="text-slate-200 font-mono">{dateRange.endDate}</strong>
+          </span>
+          <span className="text-slate-600">•</span>
+          <span className="text-[11px] text-slate-400">
+            Alarms: <strong className="text-rose-400">{eventsCount}</strong>
+          </span>
+        </div>
+        {onToggleMinimize && (
+          <button
+            onClick={onToggleMinimize}
+            className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-[11px] font-medium cursor-pointer transition"
+            title="Expand CSV Data Management Bar"
+          >
+            <Maximize2 className="w-3 h-3" />
+            <span>Expand Bar</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-slate-900/90 border border-slate-800/90 rounded-xl p-3 shadow-md backdrop-blur-sm transition-all">
@@ -161,6 +196,17 @@ export const DashboardCsvUploadBar: React.FC<DashboardCsvUploadBarProps> = ({
             <span className="hidden sm:inline">Templates</span>
             {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
+
+          {/* Minimize CSV Bar Button */}
+          {onToggleMinimize && (
+            <button
+              onClick={onToggleMinimize}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700 cursor-pointer transition"
+              title="Minimize CSV Data Bar to increase map area"
+            >
+              <Minimize2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

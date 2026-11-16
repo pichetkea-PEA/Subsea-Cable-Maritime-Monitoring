@@ -136,6 +136,11 @@ export default function App() {
   const [isTransitioningToDashboard, setIsTransitioningToDashboard] = useState(false);
   const [pendingDashboardRoute, setPendingDashboardRoute] = useState<CableRoute | null>(null);
 
+  // Dashboard Panel Visibility States (Hide panels to increase map area)
+  const [isRightPanelHidden, setIsRightPanelHidden] = useState(false);
+  const [isBottomLogsHidden, setIsBottomLogsHidden] = useState(false);
+  const [isCsvBarMinimized, setIsCsvBarMinimized] = useState(false);
+
   // In-memory ref flag to strictly lock datasets once user confirms route on Page 1
   const userConfirmedRef = useRef<boolean>(
     typeof window !== 'undefined' && localStorage.getItem('subsea_user_confirmed_route') === 'true'
@@ -419,7 +424,7 @@ export default function App() {
 
         {/* STEP 2: Dashboard Map with Live AIS Vectors & Inline CSV Uploader */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-3.5">
+          <div className="space-y-3">
             {/* Direct In-Page CSV Upload Component for Dashboard */}
             <DashboardCsvUploadBar
               cableRoute={cableRoute}
@@ -429,12 +434,26 @@ export default function App() {
               onUpdateAlarmEvents={handleUpdateAlarmEvents}
               onUpdateHistoricalData={setHistoricalData}
               onOpenDataModal={() => setIsDataModalOpen(true)}
+              isMinimized={isCsvBarMinimized}
+              onToggleMinimize={() => setIsCsvBarMinimized(prev => !prev)}
             />
 
-            {/* Top Dashboard Row: 70% Map Chart + 30% Right Panel */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-              {/* 70% Map Chart Section (8 cols out of 12 = ~67-70%) */}
-              <div className="lg:col-span-8 xl:col-span-8 flex flex-col h-[520px] lg:h-[620px]">
+            {/* Top Dashboard Row: Dynamically expands width (when Right Panel hidden) & height (when Bottom Logs hidden) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch transition-all duration-200">
+              {/* Map Chart Section: 8 cols normally, 12 cols (100% width) when Event & Threat Intelligence is hidden */}
+              <div
+                className={`${
+                  isRightPanelHidden ? 'lg:col-span-12 xl:col-span-12' : 'lg:col-span-8 xl:col-span-8'
+                } flex flex-col transition-all duration-200 ${
+                  isBottomLogsHidden
+                    ? isCsvBarMinimized
+                      ? 'h-[760px] lg:h-[calc(100vh-145px)] min-h-[720px]'
+                      : 'h-[720px] lg:h-[calc(100vh-195px)] min-h-[680px]'
+                    : isCsvBarMinimized
+                    ? 'h-[570px] lg:h-[670px]'
+                    : 'h-[520px] lg:h-[620px]'
+                }`}
+              >
                 <MapChart
                   cableRoute={cableRoute}
                   events={displayedEvents}
@@ -444,24 +463,43 @@ export default function App() {
                   setHoveredMMSI={setHoveredMMSI}
                   parkingZone={parkingZone}
                   onSnapshotCaptured={setCapturedHeatmapImage}
+                  isRightPanelHidden={isRightPanelHidden}
+                  onToggleRightPanel={() => setIsRightPanelHidden(prev => !prev)}
+                  isBottomLogsHidden={isBottomLogsHidden}
+                  onToggleBottomLogs={() => setIsBottomLogsHidden(prev => !prev)}
+                  isCsvBarMinimized={isCsvBarMinimized}
+                  onToggleCsvBar={() => setIsCsvBarMinimized(prev => !prev)}
                 />
               </div>
 
-              {/* 30% Right Panel Section (4 cols out of 12 = ~30-33%) */}
-              <div className="lg:col-span-4 xl:col-span-4 flex flex-col h-[520px] lg:h-[620px]">
-                <EventSummaryPanel
-                  events={events}
-                  cableRoute={cableRoute}
-                  selectedFilterType={selectedFilterType}
-                  setSelectedFilterType={setSelectedFilterType}
-                  onSelectEvent={setSelectedEvent}
-                  hoveredMMSI={hoveredMMSI}
-                  setHoveredMMSI={setHoveredMMSI}
-                />
-              </div>
+              {/* 30% Right Panel Section (Event & Threat Intelligence) - Hidden when user toggles hide */}
+              {!isRightPanelHidden && (
+                <div
+                  className={`lg:col-span-4 xl:col-span-4 flex flex-col transition-all duration-200 ${
+                    isBottomLogsHidden
+                      ? isCsvBarMinimized
+                        ? 'h-[760px] lg:h-[calc(100vh-145px)] min-h-[720px]'
+                        : 'h-[720px] lg:h-[calc(100vh-195px)] min-h-[680px]'
+                      : isCsvBarMinimized
+                      ? 'h-[570px] lg:h-[670px]'
+                      : 'h-[520px] lg:h-[620px]'
+                  }`}
+                >
+                  <EventSummaryPanel
+                    events={events}
+                    cableRoute={cableRoute}
+                    selectedFilterType={selectedFilterType}
+                    setSelectedFilterType={setSelectedFilterType}
+                    onSelectEvent={setSelectedEvent}
+                    hoveredMMSI={hoveredMMSI}
+                    setHoveredMMSI={setHoveredMMSI}
+                    onHidePanel={() => setIsRightPanelHidden(true)}
+                  />
+                </div>
+              )}
             </div>
 
-            {/* Bottom Section: Scrollable Detailed Event Log Table */}
+            {/* Bottom Section: Scrollable Detailed Event Log Table (Collapsible to increase map area) */}
             <div>
               <EventLogTable
                 events={displayedEvents}
@@ -471,6 +509,8 @@ export default function App() {
                 setHoveredMMSI={setHoveredMMSI}
                 eventTypeFilter={eventTypeFilter}
                 onEventTypeFilterChange={setEventTypeFilter}
+                isHidden={isBottomLogsHidden}
+                onToggleHide={() => setIsBottomLogsHidden(prev => !prev)}
               />
             </div>
           </div>

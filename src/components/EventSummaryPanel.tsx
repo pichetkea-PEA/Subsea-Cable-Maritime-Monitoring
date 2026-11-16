@@ -15,6 +15,8 @@ import {
   Anchor,
   Layers,
   Award,
+  PanelRightClose,
+  Minimize2,
 } from 'lucide-react';
 import { formatDisplayDateTime } from '../utils/geoUtils';
 
@@ -26,6 +28,7 @@ interface EventSummaryPanelProps {
   onSelectEvent: (event: AlarmEvent) => void;
   hoveredMMSI: string | null;
   setHoveredMMSI: (mmsi: string | null) => void;
+  onHidePanel?: () => void;
 }
 
 export const EventSummaryPanel: React.FC<EventSummaryPanelProps> = ({
@@ -36,6 +39,7 @@ export const EventSummaryPanel: React.FC<EventSummaryPanelProps> = ({
   onSelectEvent,
   hoveredMMSI,
   setHoveredMMSI,
+  onHidePanel,
 }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null);
@@ -154,30 +158,45 @@ export const EventSummaryPanel: React.FC<EventSummaryPanelProps> = ({
     <div className="w-full h-full bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-xl">
       {/* Panel Header */}
       <div className="p-3 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-indigo-950 border border-indigo-600/40 flex items-center justify-center text-indigo-400">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-indigo-950 border border-indigo-600/40 flex items-center justify-center text-indigo-400 shrink-0">
             <Activity className="w-3.5 h-3.5" />
           </div>
-          <div>
-            <h3 className="font-bold text-xs sm:text-sm text-slate-100">Event & Threat Intelligence</h3>
-            <p className="text-[10px] text-slate-400">Subsea Corridor Activity Monitor</p>
+          <div className="min-w-0">
+            <h3 className="font-bold text-xs sm:text-sm text-slate-100 truncate">Event & Threat Intelligence</h3>
+            <p className="text-[10px] text-slate-400 truncate">Subsea Corridor Activity Monitor</p>
           </div>
         </div>
 
-        {/* AI Analyze Trigger Button */}
-        <button
-          id="btn-run-ai-analysis"
-          onClick={handleRunAIAnalysis}
-          disabled={isAnalyzing}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-md shadow-blue-500/20 transition cursor-pointer disabled:opacity-50"
-        >
-          {isAnalyzing ? (
-            <RefreshCw className="w-3 h-3 animate-spin" />
-          ) : (
-            <Sparkles className="w-3 h-3 text-cyan-200" />
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* AI Analyze Trigger Button */}
+          <button
+            id="btn-run-ai-analysis"
+            onClick={handleRunAIAnalysis}
+            disabled={isAnalyzing}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-md shadow-blue-500/20 transition cursor-pointer disabled:opacity-50"
+          >
+            {isAnalyzing ? (
+              <RefreshCw className="w-3 h-3 animate-spin" />
+            ) : (
+              <Sparkles className="w-3 h-3 text-cyan-200" />
+            )}
+            <span>{isAnalyzing ? 'Analyzing...' : 'AI Risk Summary'}</span>
+          </button>
+
+          {/* Hide Event & Threat Intelligence Panel Button */}
+          {onHidePanel && (
+            <button
+              id="btn-hide-threat-intel-panel"
+              onClick={onHidePanel}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium transition cursor-pointer"
+              title="Hide Event & Threat Intelligence panel to expand map width"
+            >
+              <PanelRightClose className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden xl:inline">Hide</span>
+            </button>
           )}
-          <span>{isAnalyzing ? 'Analyzing...' : 'AI Risk Summary'}</span>
-        </button>
+        </div>
       </div>
 
       {/* Metric Cards Row */}

@@ -11,6 +11,12 @@ import {
   LogOut,
   Info as InfoIcon,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Minimize2,
+  Maximize2,
+  EyeOff,
+  Eye,
 } from 'lucide-react';
 import { formatDisplayDateTime } from '../utils/geoUtils';
 
@@ -23,6 +29,8 @@ interface EventLogTableProps {
   eventTypeFilter?: 'ALL' | 'Ship Enter' | 'Ship Exit' | 'Ship Anchoring';
   onEventTypeFilterChange?: (filter: 'ALL' | 'Ship Enter' | 'Ship Exit' | 'Ship Anchoring') => void;
   onUpdateEventStatus?: (eventId: string, newStatus: any) => void;
+  isHidden?: boolean;
+  onToggleHide?: () => void;
 }
 
 export const EventLogTable: React.FC<EventLogTableProps> = ({
@@ -33,6 +41,8 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
   setHoveredMMSI,
   eventTypeFilter: externalFilterType,
   onEventTypeFilterChange,
+  isHidden = false,
+  onToggleHide,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [internalFilterType, setInternalFilterType] = useState<'ALL' | 'Ship Enter' | 'Ship Exit' | 'Ship Anchoring'>('ALL');
@@ -137,6 +147,44 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
     document.body.removeChild(link);
   };
 
+  if (isHidden) {
+    return (
+      <div
+        id="detailed-incident-log-section"
+        className="w-full bg-slate-900/95 border border-slate-800 rounded-xl px-4 py-2 shadow-md flex items-center justify-between gap-3 text-xs"
+      >
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Ship className="w-4 h-4 text-cyan-400" />
+          <span className="font-bold text-slate-200">Detailed Maritime Incident Logs</span>
+          <span className="text-[11px] text-cyan-300 bg-slate-950 px-2.5 py-0.5 rounded-full border border-slate-800 font-medium">
+            {sortedEvents.length} Incident Records
+          </span>
+          {selectedEvent && (
+            <span className="text-[11px] text-amber-300 bg-amber-950/70 border border-amber-700/50 px-2 py-0.5 rounded-full">
+              Selected: <strong>{selectedEvent.vesselName}</strong> ({selectedEvent.mmsi})
+            </span>
+          )}
+          <span className="text-[11px] text-slate-400 hidden sm:inline">
+            • Hidden to maximize situational map area
+          </span>
+        </div>
+
+        {onToggleHide && (
+          <button
+            id="btn-show-incident-logs"
+            onClick={onToggleHide}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-950/90 hover:bg-cyan-900 text-cyan-200 border border-cyan-600/60 font-semibold transition cursor-pointer shadow-sm"
+            title="Show Detailed Maritime Incident Logs Table"
+          >
+            <Eye className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Show Incident Logs</span>
+            <ChevronUp className="w-3.5 h-3.5 text-cyan-400" />
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div id="detailed-incident-log-section" className="w-full bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col">
       {/* Table Toolbar */}
@@ -225,6 +273,20 @@ export const EventLogTable: React.FC<EventLogTableProps> = ({
             <Download className="w-3.5 h-3.5 text-cyan-400" />
             <span>Export CSV</span>
           </button>
+
+          {/* Hide Detailed Maritime Incident Logs Button */}
+          {onToggleHide && (
+            <button
+              id="btn-hide-incident-logs"
+              onClick={onToggleHide}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition cursor-pointer font-medium"
+              title="Hide Detailed Maritime Incident Logs to increase map area"
+            >
+              <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+              <span>Hide Logs</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+          )}
         </div>
       </div>
 

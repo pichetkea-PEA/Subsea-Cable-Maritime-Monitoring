@@ -3,7 +3,29 @@ import L from 'leaflet';
 import { CableRoute, AlarmEvent, ParkingZone } from '../types';
 import { generateCableBufferPolygon, isPointInPolygon, calculatePolygonAreaSqKm } from '../utils/geoUtils';
 import { captureLeafletMap, getFullCorridorBounds } from '../utils/mapCapture';
-import { Layers, Shield, Compass, ZoomIn, ZoomOut, Maximize2, AlertTriangle, Ship, Flame, Anchor, Camera, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  Layers,
+  Shield,
+  Compass,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Minimize2,
+  AlertTriangle,
+  Ship,
+  Flame,
+  Anchor,
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  PanelRightClose,
+  PanelRightOpen,
+  PanelBottomClose,
+  PanelBottomOpen,
+  Minus,
+  Plus,
+} from 'lucide-react';
 import { ShipPhoto } from './ShipPhoto';
 
 interface MapChartProps {
@@ -15,7 +37,15 @@ interface MapChartProps {
   setHoveredMMSI: (mmsi: string | null) => void;
   parkingZone?: ParkingZone | null;
   onSnapshotCaptured?: (dataUrl: string) => void;
+  isRightPanelHidden?: boolean;
+  onToggleRightPanel?: () => void;
+  isBottomLogsHidden?: boolean;
+  onToggleBottomLogs?: () => void;
+  isCsvBarMinimized?: boolean;
+  onToggleCsvBar?: () => void;
 }
+
+type MinimizableHeaderKey = 'heatmap' | 'cable' | 'buffer' | 'parking' | 'events' | 'basemap' | 'capture';
 
 export const MapChart: React.FC<MapChartProps> = ({
   cableRoute,
@@ -26,6 +56,12 @@ export const MapChart: React.FC<MapChartProps> = ({
   setHoveredMMSI,
   parkingZone,
   onSnapshotCaptured,
+  isRightPanelHidden = false,
+  onToggleRightPanel,
+  isBottomLogsHidden = false,
+  onToggleBottomLogs,
+  isCsvBarMinimized = false,
+  onToggleCsvBar,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -52,6 +88,41 @@ export const MapChart: React.FC<MapChartProps> = ({
   const [mapCaptureMessage, setMapCaptureMessage] = useState<string | null>(null);
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
 
+  // Header & Control Minimize States (to increase map area)
+  const [isMapHeaderMinimized, setIsMapHeaderMinimized] = useState(false);
+  const [minimizedHeaderItems, setMinimizedHeaderItems] = useState<Record<MinimizableHeaderKey, boolean>>({
+    heatmap: false,
+    cable: false,
+    buffer: false,
+    parking: false,
+    events: false,
+    basemap: false,
+    capture: false,
+  });
+
+  const toggleHeaderItemMinimize = (key: MinimizableHeaderKey, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMinimizedHeaderItems(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const allHeaderItemsMinimized = Object.values(minimizedHeaderItems).every(Boolean);
+
+  const handleToggleMinimizeAllHeaderItems = () => {
+    const nextVal = !allHeaderItemsMinimized;
+    setMinimizedHeaderItems({
+      heatmap: nextVal,
+      cable: nextVal,
+      buffer: nextVal,
+      parking: nextVal,
+      events: nextVal,
+      basemap: nextVal,
+      capture: nextVal,
+    });
+  };
+
   // Reliable, free tile URLs with ZERO API key required
   const tileUrls = {
     dark: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -65,7 +136,7 @@ export const MapChart: React.FC<MapChartProps> = ({
     satellite: '&copy; Esri, Maxar, Earthstar Geographics',
   };
 
-  // 1. Initialize Map
+  // 1. Initialize Map & ResizeObserver so map canvas always fills expanded container
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -109,16 +180,40 @@ export const MapChart: React.FC<MapChartProps> = ({
 
     mapInstanceRef.current = map;
 
-    // Fix render size
+    // Automatically invalidate map size whenever container expands/contracts
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && mapContainerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        map.invalidateSize({ animate: false });
+      });
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
+    // Fix initial render size
     setTimeout(() => {
       map.invalidateSize();
     }, 200);
 
     return () => {
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
+
+  // Re-validate Leaflet size whenever layout panels or header minimize states toggle
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const t1 = setTimeout(() => map.invalidateSize(), 50);
+    const t2 = setTimeout(() => map.invalidateSize(), 250);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [isRightPanelHidden, isBottomLogsHidden, isCsvBarMinimized, isMapHeaderMinimized, minimizedHeaderItems]);
 
   // Preset: Select Only Heatmap & Capture Picture covering all area
   const handleSelectOnlyHeatmapAndCapture = useCallback(async () => {
@@ -510,140 +605,330 @@ export const MapChart: React.FC<MapChartProps> = ({
     }
   }, [selectedEvent]);
 
+  const isFullMapMode = isMapHeaderMinimized && isRightPanelHidden && isBottomLogsHidden;
+
+  const handleToggleFullMapMode = () => {
+    if (isFullMapMode) {
+      setIsMapHeaderMinimized(false);
+      if (isRightPanelHidden && onToggleRightPanel) onToggleRightPanel();
+      if (isBottomLogsHidden && onToggleBottomLogs) onToggleBottomLogs();
+      if (isCsvBarMinimized && onToggleCsvBar) onToggleCsvBar();
+    } else {
+      setIsMapHeaderMinimized(true);
+      if (!isRightPanelHidden && onToggleRightPanel) onToggleRightPanel();
+      if (!isBottomLogsHidden && onToggleBottomLogs) onToggleBottomLogs();
+      if (!isCsvBarMinimized && onToggleCsvBar) onToggleCsvBar();
+    }
+  };
+
   return (
     <div className="relative w-full h-full min-h-[480px] lg:min-h-[580px] bg-slate-950 rounded-xl overflow-hidden border border-slate-800 shadow-xl flex flex-col">
-      {/* Map Header Toolbar */}
-      <div className="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-2 z-10">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-            <Compass className="w-4 h-4 text-cyan-400" />
-            <span>Maritime Situational Map</span>
-          </div>
-          <span className="text-slate-600">|</span>
-          <span className="text-[11px] text-slate-400">
-            Scale: <strong className="text-slate-300">1:50,000</strong> • Coordinates: <span className="text-slate-300 font-mono">WGS84</span>
-          </span>
-          {showHeatMap && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-600/50">
-              <Flame className="w-3 h-3 text-amber-400" />
-              HEAT MAP ACTIVE
-            </span>
-          )}
-        </div>
+      {/* Map Header Toolbar (Hidden when minimized to increase vertical map area) */}
+      {!isMapHeaderMinimized && (
+        <div className="bg-slate-900/95 backdrop-blur border-b border-slate-800 px-3.5 py-2 flex flex-col gap-2 z-10">
+          {/* Top Row: Map Title + Panel Visibility & Header Minimize Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                <Compass className="w-4 h-4 text-cyan-400" />
+                <span>Maritime Situational Map</span>
+              </div>
+              <span className="text-slate-600">|</span>
+              <span className="text-[11px] text-slate-400">
+                Scale: <strong className="text-slate-300">1:50,000</strong> • Coordinates: <span className="text-slate-300 font-mono">WGS84</span>
+              </span>
+              {showHeatMap && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-600/50">
+                  <Flame className="w-3 h-3 text-amber-400" />
+                  HEAT MAP ACTIVE
+                </span>
+              )}
+            </div>
 
-        {/* Layer Toggles */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Heat Map Toggle */}
-          <button
-            id="toggle-layer-heatmap"
-            onClick={() => setShowHeatMap(!showHeatMap)}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition cursor-pointer ${
-              showHeatMap ? 'bg-amber-600 text-white font-bold shadow-md shadow-amber-600/30' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-            }`}
-            title="Toggle Traffic Density Heat Map"
-          >
-            <Flame className="w-3.5 h-3.5 text-amber-400" />
-            <span>Heat Map</span>
-          </button>
+            {/* Workspace Panel & Header Minimize Buttons */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Minimize All Header Items Toggle */}
+              <button
+                id="btn-minimize-all-header-items"
+                onClick={handleToggleMinimizeAllHeaderItems}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                title={allHeaderItemsMinimized ? 'Expand all layer header buttons' : 'Minimize all layer header buttons (Heat Map, Cable Route, 500m Zone, etc.)'}
+              >
+                {allHeaderItemsMinimized ? <Plus className="w-3 h-3 text-cyan-400" /> : <Minus className="w-3 h-3 text-cyan-400" />}
+                <span>{allHeaderItemsMinimized ? 'Expand Controls' : 'Compact Controls'}</span>
+              </button>
 
-          {/* Cable Toggle */}
-          <button
-            id="toggle-layer-cable"
-            onClick={() => setShowCable(!showCable)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition cursor-pointer ${
-              showCable ? 'bg-cyan-950 text-cyan-300 border border-cyan-700/60' : 'bg-slate-800 text-slate-400'
-            }`}
-            title="Toggle Subsea Cable Polyline"
-          >
-            <div className="w-2.5 h-1 bg-cyan-400 rounded"></div>
-            <span>Cable Route</span>
-          </button>
+              {/* Toggle Event & Threat Intelligence Panel (Right) */}
+              {onToggleRightPanel && (
+                <button
+                  id="btn-map-toggle-right-panel"
+                  onClick={onToggleRightPanel}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition cursor-pointer ${
+                    isRightPanelHidden
+                      ? 'bg-indigo-950/90 text-indigo-200 border-indigo-500/60 hover:bg-indigo-900'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+                  }`}
+                  title={isRightPanelHidden ? 'Show Event & Threat Intelligence Panel (Right)' : 'Hide Event & Threat Intelligence Panel (Right) to increase map width'}
+                >
+                  {isRightPanelHidden ? (
+                    <PanelRightOpen className="w-3.5 h-3.5 text-indigo-400" />
+                  ) : (
+                    <PanelRightClose className="w-3.5 h-3.5 text-indigo-400" />
+                  )}
+                  <span>{isRightPanelHidden ? 'Show Threat Intel' : 'Hide Threat Intel'}</span>
+                </button>
+              )}
 
-          {/* Buffer Toggle */}
-          <button
-            id="toggle-layer-buffer"
-            onClick={() => setShowBuffer(!showBuffer)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition cursor-pointer ${
-              showBuffer ? 'bg-amber-950 text-amber-300 border border-amber-700/60' : 'bg-slate-800 text-slate-400'
-            }`}
-            title="Toggle 500m Safety Buffer Corridor"
-          >
-            <Shield className="w-3 h-3 text-amber-400" />
-            <span>500m Zone</span>
-          </button>
+              {/* Toggle Detailed Maritime Incident Logs (Bottom) */}
+              {onToggleBottomLogs && (
+                <button
+                  id="btn-map-toggle-bottom-logs"
+                  onClick={onToggleBottomLogs}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition cursor-pointer ${
+                    isBottomLogsHidden
+                      ? 'bg-cyan-950/90 text-cyan-200 border-cyan-500/60 hover:bg-cyan-900'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+                  }`}
+                  title={isBottomLogsHidden ? 'Show Detailed Maritime Incident Logs (Bottom)' : 'Hide Detailed Maritime Incident Logs (Bottom) to increase map height'}
+                >
+                  {isBottomLogsHidden ? (
+                    <PanelBottomOpen className="w-3.5 h-3.5 text-cyan-400" />
+                  ) : (
+                    <PanelBottomClose className="w-3.5 h-3.5 text-cyan-400" />
+                  )}
+                  <span>{isBottomLogsHidden ? 'Show Incident Logs' : 'Hide Incident Logs'}</span>
+                </button>
+              )}
 
-          {/* Parking Zone Toggle */}
-          {parkingZone && (
-            <button
-              id="toggle-layer-parking-zone"
-              onClick={() => setShowParkingZone(!showParkingZone)}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition cursor-pointer ${
-                showParkingZone ? 'bg-blue-950 text-blue-300 border border-blue-600/70 shadow-sm' : 'bg-slate-800 text-slate-400'
-              }`}
-              title="Toggle Samui Vessel Parking Zone (Large-size ship anchorage)"
-            >
-              <Anchor className="w-3 h-3 text-blue-400" />
-              <span>Parking Zone</span>
-            </button>
-          )}
+              {/* Minimize Entire Map Header Bar */}
+              <button
+                id="btn-minimize-map-header"
+                onClick={() => setIsMapHeaderMinimized(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                title="Minimize Map Header Toolbar to increase map area"
+              >
+                <ChevronUp className="w-3.5 h-3.5 text-amber-400" />
+                <span>Minimize Header</span>
+              </button>
 
-          {/* Incident Dots Toggle */}
-          <button
-            id="toggle-layer-events"
-            onClick={() => setShowEvents(!showEvents)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition cursor-pointer ${
-              showEvents ? 'bg-rose-950 text-rose-300 border border-rose-700/60' : 'bg-slate-800 text-slate-400'
-            }`}
-            title="Toggle Alarms & Alerts Dots"
-          >
-            <AlertTriangle className="w-3 h-3 text-rose-400" />
-            <span>Incident Dots ({events.length})</span>
-          </button>
-
-          {/* Base Map Selector */}
-          <div className="flex items-center bg-slate-950 border border-slate-700/70 rounded p-0.5 ml-1">
-            <button
-              id="map-style-dark"
-              onClick={() => setBaseMapStyle('dark')}
-              className={`px-2 py-0.5 text-[11px] rounded transition cursor-pointer ${
-                baseMapStyle === 'dark' ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Nautical Dark
-            </button>
-            <button
-              id="map-style-ocean"
-              onClick={() => setBaseMapStyle('ocean')}
-              className={`px-2 py-0.5 text-[11px] rounded transition cursor-pointer ${
-                baseMapStyle === 'ocean' ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Ocean Base
-            </button>
-            <button
-              id="map-style-satellite"
-              onClick={() => setBaseMapStyle('satellite')}
-              className={`px-2 py-0.5 text-[11px] rounded transition cursor-pointer ${
-                baseMapStyle === 'satellite' ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Satellite
-            </button>
+              {/* Maximize Map (Activate All Hidden Panels at Once) */}
+              <button
+                id="btn-maximize-all-map-area"
+                onClick={handleToggleFullMapMode}
+                className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-sm transition cursor-pointer"
+                title="Hide all panels & minimize header to maximize map area"
+              >
+                <Maximize2 className="w-3 h-3" />
+                <span>Full Map</span>
+              </button>
+            </div>
           </div>
 
-          {/* Preset: Select Only Heatmap & Capture for PDF Report */}
-          <button
-            id="btn-select-only-heatmap-capture"
-            onClick={handleSelectOnlyHeatmapAndCapture}
-            disabled={isCapturingMap}
-            className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition cursor-pointer bg-gradient-to-r from-amber-600 via-rose-600 to-orange-600 hover:from-amber-500 hover:to-rose-500 text-white shadow-md shadow-amber-900/30 border border-amber-400/40 ml-1"
-            title="Select only heatmap, fit bounds to cover all area, and capture picture for PDF Report"
-          >
-            <Camera className="w-3.5 h-3.5 text-white" />
-            <span>{isCapturingMap ? 'Capturing...' : 'Capture Heatmap Picture (All Area)'}</span>
-          </button>
+          {/* Bottom Row: Layer Toggles with Individual Minimize Button (-) on Each Header Item */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800/70">
+            {/* 1. Heat Map Header Item + Minimize Button */}
+            <div className={`inline-flex items-center rounded overflow-hidden border transition ${
+              showHeatMap ? 'bg-amber-600 border-amber-400 shadow-md shadow-amber-600/30' : 'bg-slate-800 border-slate-700/80 hover:bg-slate-750'
+            }`}>
+              <button
+                id="toggle-layer-heatmap"
+                onClick={() => setShowHeatMap(!showHeatMap)}
+                className={`flex items-center gap-1 px-2 py-1 text-xs font-medium transition cursor-pointer ${
+                  showHeatMap ? 'text-white font-bold' : 'text-slate-300 hover:text-white'
+                }`}
+                title="Toggle Traffic Density Heat Map"
+              >
+                <Flame className={`w-3.5 h-3.5 ${showHeatMap ? 'text-white' : 'text-amber-400'}`} />
+                {!minimizedHeaderItems.heatmap && <span>Heat Map</span>}
+              </button>
+              <button
+                onClick={(e) => toggleHeaderItemMinimize('heatmap', e)}
+                className="px-1.5 py-1 border-l border-slate-700/60 hover:bg-black/25 text-slate-300 hover:text-white cursor-pointer transition"
+                title={minimizedHeaderItems.heatmap ? 'Expand Heat Map label' : 'Minimize Heat Map header button'}
+              >
+                {minimizedHeaderItems.heatmap ? <Plus className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+              </button>
+            </div>
+
+            {/* 2. Cable Route Header Item + Minimize Button */}
+            <div className={`inline-flex items-center rounded overflow-hidden border transition ${
+              showCable ? 'bg-cyan-950 border-cyan-700/60' : 'bg-slate-800 border-slate-700/80'
+            }`}>
+              <button
+                id="toggle-layer-cable"
+                onClick={() => setShowCable(!showCable)}
+                className={`flex items-center gap-1 px-2 py-1 text-xs transition cursor-pointer ${
+                  showCable ? 'text-cyan-300' : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Toggle Subsea Cable Polyline"
+              >
+                <div className="w-2.5 h-1 bg-cyan-400 rounded"></div>
+                {!minimizedHeaderItems.cable && <span>Cable Route</span>}
+              </button>
+              <button
+                onClick={(e) => toggleHeaderItemMinimize('cable', e)}
+                className="px-1.5 py-1 border-l border-slate-700/60 hover:bg-black/25 text-slate-400 hover:text-white cursor-pointer transition"
+                title={minimizedHeaderItems.cable ? 'Expand Cable Route label' : 'Minimize Cable Route header button'}
+              >
+                {minimizedHeaderItems.cable ? <Plus className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+              </button>
+            </div>
+
+            {/* 3. 500m Zone Header Item + Minimize Button */}
+            <div className={`inline-flex items-center rounded overflow-hidden border transition ${
+              showBuffer ? 'bg-amber-950 border-amber-700/60' : 'bg-slate-800 border-slate-700/80'
+            }`}>
+              <button
+                id="toggle-layer-buffer"
+                onClick={() => setShowBuffer(!showBuffer)}
+                className={`flex items-center gap-1 px-2 py-1 text-xs transition cursor-pointer ${
+                  showBuffer ? 'text-amber-300' : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Toggle 500m Safety Buffer Corridor"
+              >
+                <Shield className="w-3 h-3 text-amber-400" />
+                {!minimizedHeaderItems.buffer && <span>500m Zone</span>}
+              </button>
+              <button
+                onClick={(e) => toggleHeaderItemMinimize('buffer', e)}
+                className="px-1.5 py-1 border-l border-slate-700/60 hover:bg-black/25 text-slate-400 hover:text-white cursor-pointer transition"
+                title={minimizedHeaderItems.buffer ? 'Expand 500m Zone label' : 'Minimize 500m Zone header button'}
+              >
+                {minimizedHeaderItems.buffer ? <Plus className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+              </button>
+            </div>
+
+            {/* 4. Parking Zone Header Item + Minimize Button */}
+            {parkingZone && (
+              <div className={`inline-flex items-center rounded overflow-hidden border transition ${
+                showParkingZone ? 'bg-blue-950 border-blue-600/70 shadow-sm' : 'bg-slate-800 border-slate-700/80'
+              }`}>
+                <button
+                  id="toggle-layer-parking-zone"
+                  onClick={() => setShowParkingZone(!showParkingZone)}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs transition cursor-pointer ${
+                    showParkingZone ? 'text-blue-300' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Toggle Samui Vessel Parking Zone (Large-size ship anchorage)"
+                >
+                  <Anchor className="w-3 h-3 text-blue-400" />
+                  {!minimizedHeaderItems.parking && <span>Parking Zone</span>}
+                </button>
+                <button
+                  onClick={(e) => toggleHeaderItemMinimize('parking', e)}
+                  className="px-1.5 py-1 border-l border-slate-700/60 hover:bg-black/25 text-slate-400 hover:text-white cursor-pointer transition"
+                  title={minimizedHeaderItems.parking ? 'Expand Parking Zone label' : 'Minimize Parking Zone header button'}
+                >
+                  {minimizedHeaderItems.parking ? <Plus className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+                </button>
+              </div>
+            )}
+
+            {/* 5. Incident Dots Header Item + Minimize Button */}
+            <div className={`inline-flex items-center rounded overflow-hidden border transition ${
+              showEvents ? 'bg-rose-950 border-rose-700/60' : 'bg-slate-800 border-slate-700/80'
+            }`}>
+              <button
+                id="toggle-layer-events"
+                onClick={() => setShowEvents(!showEvents)}
+                className={`flex items-center gap-1 px-2 py-1 text-xs transition cursor-pointer ${
+                  showEvents ? 'text-rose-300' : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Toggle Alarms & Alerts Dots"
+              >
+                <AlertTriangle className="w-3 h-3 text-rose-400" />
+                {!minimizedHeaderItems.events ? (
+                  <span>Incident Dots ({events.length})</span>
+                ) : (
+                  <span className="text-[10px] font-mono">{events.length}</span>
+                )}
+              </button>
+              <button
+                onClick={(e) => toggleHeaderItemMinimize('events', e)}
+                className="px-1.5 py-1 border-l border-slate-700/60 hover:bg-black/25 text-slate-400 hover:text-white cursor-pointer transition"
+                title={minimizedHeaderItems.events ? 'Expand Incident Dots label' : 'Minimize Incident Dots header button'}
+              >
+                {minimizedHeaderItems.events ? <Plus className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+              </button>
+            </div>
+
+            {/* 6. Base Map Selector + Minimize Button */}
+            <div className="inline-flex items-center bg-slate-950 border border-slate-700/70 rounded p-0.5 ml-0.5">
+              {!minimizedHeaderItems.basemap ? (
+                <>
+                  <button
+                    id="map-style-dark"
+                    onClick={() => setBaseMapStyle('dark')}
+                    className={`px-2 py-0.5 text-[11px] rounded transition cursor-pointer ${
+                      baseMapStyle === 'dark' ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Nautical Dark
+                  </button>
+                  <button
+                    id="map-style-ocean"
+                    onClick={() => setBaseMapStyle('ocean')}
+                    className={`px-2 py-0.5 text-[11px] rounded transition cursor-pointer ${
+                      baseMapStyle === 'ocean' ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Ocean Base
+                  </button>
+                  <button
+                    id="map-style-satellite"
+                    onClick={() => setBaseMapStyle('satellite')}
+                    className={`px-2 py-0.5 text-[11px] rounded transition cursor-pointer ${
+                      baseMapStyle === 'satellite' ? 'bg-blue-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Satellite
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() =>
+                    setBaseMapStyle(baseMapStyle === 'dark' ? 'ocean' : baseMapStyle === 'ocean' ? 'satellite' : 'dark')
+                  }
+                  className="px-2 py-0.5 text-[11px] bg-blue-600 text-white font-medium rounded cursor-pointer"
+                  title="Cycle Map Style (Nautical Dark / Ocean Base / Satellite)"
+                >
+                  {baseMapStyle === 'dark' ? 'Dark' : baseMapStyle === 'ocean' ? 'Ocean' : 'Sat'}
+                </button>
+              )}
+              <button
+                onClick={(e) => toggleHeaderItemMinimize('basemap', e)}
+                className="px-1.5 py-0.5 ml-0.5 border-l border-slate-800 text-slate-400 hover:text-white cursor-pointer transition"
+                title={minimizedHeaderItems.basemap ? 'Expand Base Map options' : 'Minimize Base Map selector'}
+              >
+                {minimizedHeaderItems.basemap ? <Plus className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+              </button>
+            </div>
+
+            {/* 7. Capture Heatmap Picture Header Item + Minimize Button */}
+            <div className="inline-flex items-center rounded overflow-hidden bg-gradient-to-r from-amber-600 via-rose-600 to-orange-600 shadow-md shadow-amber-900/30 border border-amber-400/40 ml-0.5">
+              <button
+                id="btn-select-only-heatmap-capture"
+                onClick={handleSelectOnlyHeatmapAndCapture}
+                disabled={isCapturingMap}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold transition cursor-pointer hover:bg-white/10 text-white"
+                title="Select only heatmap, fit bounds to cover all area, and capture picture for PDF Report"
+              >
+                <Camera className="w-3.5 h-3.5 text-white" />
+                {!minimizedHeaderItems.capture && (
+                  <span>{isCapturingMap ? 'Capturing...' : 'Capture Heatmap Picture (All Area)'}</span>
+                )}
+              </button>
+              <button
+                onClick={(e) => toggleHeaderItemMinimize('capture', e)}
+                className="px-1.5 py-1 border-l border-white/25 hover:bg-black/20 text-white cursor-pointer transition"
+                title={minimizedHeaderItems.capture ? 'Expand Capture Heatmap label' : 'Minimize Capture Heatmap button'}
+              >
+                {minimizedHeaderItems.capture ? <Plus className="w-2.5 h-2.5" /> : <Minus className="w-2.5 h-2.5" />}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Map Capture Status Banner */}
       {mapCaptureMessage && (
@@ -659,6 +944,55 @@ export const MapChart: React.FC<MapChartProps> = ({
       {/* Map Viewport Container */}
       <div className="relative flex-1 w-full h-full min-h-[440px]">
         <div ref={mapContainerRef} className="w-full h-full" />
+
+        {/* Floating Minimized Map Header Pill (Shown when Map Header is minimized) */}
+        {isMapHeaderMinimized && (
+          <div className="absolute top-3 left-3 z-[430] bg-slate-900/95 backdrop-blur-md border border-slate-700/90 rounded-xl px-3 py-1.5 shadow-2xl flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex items-center gap-1.5 font-bold text-slate-100">
+              <Compass className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Maritime Map</span>
+            </div>
+            <button
+              id="btn-restore-map-header"
+              onClick={() => setIsMapHeaderMinimized(false)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-200 border border-cyan-600/60 text-[11px] font-semibold cursor-pointer transition"
+              title="Expand Map Header & Layer Controls"
+            >
+              <ChevronDown className="w-3 h-3 text-cyan-400" />
+              <span>Show Map Header</span>
+            </button>
+            {onToggleRightPanel && (
+              <button
+                onClick={onToggleRightPanel}
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] cursor-pointer transition"
+                title={isRightPanelHidden ? 'Show Event & Threat Intelligence Panel' : 'Hide Event & Threat Intelligence Panel'}
+              >
+                {isRightPanelHidden ? <PanelRightOpen className="w-3 h-3 text-indigo-400" /> : <PanelRightClose className="w-3 h-3 text-indigo-400" />}
+                <span>{isRightPanelHidden ? 'Show Threat Intel' : 'Hide Threat Intel'}</span>
+              </button>
+            )}
+            {onToggleBottomLogs && (
+              <button
+                onClick={onToggleBottomLogs}
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] cursor-pointer transition"
+                title={isBottomLogsHidden ? 'Show Detailed Maritime Incident Logs' : 'Hide Detailed Maritime Incident Logs'}
+              >
+                {isBottomLogsHidden ? <PanelBottomOpen className="w-3 h-3 text-cyan-400" /> : <PanelBottomClose className="w-3 h-3 text-cyan-400" />}
+                <span>{isBottomLogsHidden ? 'Show Logs' : 'Hide Logs'}</span>
+              </button>
+            )}
+            {isFullMapMode && (
+              <button
+                onClick={handleToggleFullMapMode}
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold cursor-pointer transition"
+                title="Restore all dashboard panels"
+              >
+                <Minimize2 className="w-3 h-3" />
+                <span>Restore All Panels</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Selected Ship Isolation Banner */}
         {selectedEvent && (
