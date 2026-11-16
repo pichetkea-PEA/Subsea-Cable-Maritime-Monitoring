@@ -190,22 +190,20 @@ export const ReportSatelliteHeatmap: React.FC<ReportSatelliteHeatmapProps> = ({
       const lngSpan = Math.max(maxLng - minLng, 0.040);
 
       // Relocate labels strictly away from cable corridor and inside picture borders:
-      // West terminal (Koh Si Chang Island) -> moved SOUTH into clear bottom water area
-      // East terminal (Si Racha Mainland) -> moved NORTH into clear upper coastal area
-      const southOffset = Math.max(latSpan * 0.46, 0.022);
-      const northOffset = Math.max(latSpan * 0.46, 0.022);
-      const lngShift = Math.max(lngSpan * 0.08, 0.006);
+      const isKp0South = kp0.lat <= kpEnd.lat;
+      const southOffset = Math.max(latSpan * 0.36, 0.022);
+      const northOffset = Math.max(latSpan * 0.34, 0.022);
 
-      if (isKp0West) {
-        // kp0 is on the WEST (Koh Si Chang Island) -> move SOUTH into clear bottom water
-        kp0LabelCoord = [kp0.lat - southOffset, kp0.lng + lngShift];
-        // kpEnd is on the EAST (Si Racha Mainland) -> move NORTH into clear upper area
-        kpEndLabelCoord = [kpEnd.lat + northOffset, kpEnd.lng - lngShift];
+      if (isKp0South) {
+        // kp0 is the Southern terminal -> place strictly SOUTH of minLat
+        kp0LabelCoord = [Math.min(kp0.lat, minLat) - southOffset, kp0.lng - 0.015];
+        // kpEnd is the Northern terminal -> place strictly NORTH of maxLat (above any northern cable curve)
+        kpEndLabelCoord = [Math.max(kpEnd.lat, maxLat) + northOffset, kpEnd.lng];
       } else {
-        // kp0 is on the EAST -> move NORTH
-        kp0LabelCoord = [kp0.lat + northOffset, kp0.lng - lngShift];
-        // kpEnd is on the WEST -> move SOUTH
-        kpEndLabelCoord = [kpEnd.lat - southOffset, kpEnd.lng + lngShift];
+        // kp0 is the Northern terminal -> place strictly NORTH of maxLat
+        kp0LabelCoord = [Math.max(kp0.lat, maxLat) + northOffset, kp0.lng];
+        // kpEnd is the Southern terminal -> place strictly SOUTH of minLat
+        kpEndLabelCoord = [Math.min(kpEnd.lat, minLat) - southOffset, kpEnd.lng - 0.015];
       }
 
       // Leader line for KP 0.0
@@ -227,7 +225,7 @@ export const ReportSatelliteHeatmap: React.FC<ReportSatelliteHeatmapProps> = ({
           </div>
         `,
         iconSize: [170, 26],
-        iconAnchor: isKp0West ? [85, 0] : [85, 26],
+        iconAnchor: isKp0South ? [85, 0] : [85, 26],
       });
       corridorGroup.addLayer(L.marker(kp0LabelCoord, { icon: kp0Icon, interactive: false }));
 
@@ -260,12 +258,13 @@ export const ReportSatelliteHeatmap: React.FC<ReportSatelliteHeatmapProps> = ({
           </div>
         `,
         iconSize: [180, 26],
-        iconAnchor: isKp0West ? [90, 26] : [90, 0],
+        iconAnchor: isKp0South ? [90, 26] : [90, 0],
       });
       corridorGroup.addLayer(L.marker(kpEndLabelCoord, { icon: kpEndIcon, interactive: false }));
     }
 
-    // 2. Vessel Parking Zone (Only for Samui)
+    // 2. Vessel Parking Zone (Only for Samui) - Label positioned strictly to the LEFT (West) in open sea, away from cable route
+    let parkingBoundsPoint: { lat: number; lng: number } | null = null;
     if (isSamuiRoute && parkingZone?.coordinates && parkingZone.coordinates.length >= 3) {
       const parkingCoords: [number, number][] = parkingZone.coordinates.map(c => [c.lat, c.lng]);
       const parkingPoly = L.polygon(parkingCoords, {
@@ -279,26 +278,35 @@ export const ReportSatelliteHeatmap: React.FC<ReportSatelliteHeatmapProps> = ({
       });
       corridorGroup.addLayer(parkingPoly);
 
-      const parkingLabelCoord: [number, number] = [9.620, 99.730];
-      const parkingNorthEdge: [number, number] = [9.560, 99.800];
-      const parkingLeaderLine = L.polyline([parkingNorthEdge, parkingLabelCoord], {
+      // Compute exact West boundary of parking zone so callout extends strictly LEFT (West) away from cable route
+      const pLats = parkingZone.coordinates.map(c => c.lat);
+      const pLngs = parkingZone.coordinates.map(c => c.lng);
+      const pMinLng = Math.min(...pLngs);
+      const pMidLat = (Math.min(...pLats) + Math.max(...pLats)) / 2;
+
+      const parkingWestEdge: [number, number] = [pMidLat + 0.01, pMinLng];
+      const parkingLabelCoord: [number, number] = [pMidLat + 0.025, pMinLng - 0.045];
+      parkingBoundsPoint = { lat: parkingLabelCoord[0], lng: pMinLng - 0.22 };
+
+      const parkingLeaderLine = L.polyline([parkingWestEdge, parkingLabelCoord], {
         color: '#60a5fa',
-        weight: 1.2,
+        weight: 1.4,
         dashArray: '3, 3',
-        opacity: 0.8,
+        opacity: 0.9,
         interactive: false,
       });
       corridorGroup.addLayer(parkingLeaderLine);
 
+      // Right-anchored (iconAnchor: [215, 13]) so the 215px box extends LEFT into open sea, never touching the cable route
       const parkingLabelIcon = L.divIcon({
         className: 'custom-outside-label',
         html: `
-          <div style="background: rgba(15, 23, 42, 0.92); border: 1.5px solid #3b82f6; border-radius: 6px; padding: 3px 10px; font-size: 9.5px; font-weight: bold; color: #60a5fa; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.7); display: flex; align-items: center; gap: 5px; box-sizing: border-box;">
+          <div style="background: rgba(15, 23, 42, 0.94); border: 1.5px solid #3b82f6; border-radius: 6px; padding: 3px 9px; font-size: 9px; font-weight: bold; color: #60a5fa; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.8); display: flex; align-items: center; gap: 5px; box-sizing: border-box;">
             <span>⚓ Samui Vessel Parking Zone (44.6 km²)</span>
           </div>
         `,
-        iconSize: [230, 26],
-        iconAnchor: [10, 13],
+        iconSize: [215, 26],
+        iconAnchor: [215, 13],
       });
       corridorGroup.addLayer(L.marker(parkingLabelCoord, { icon: parkingLabelIcon, interactive: false }));
     }
@@ -357,18 +365,22 @@ export const ReportSatelliteHeatmap: React.FC<ReportSatelliteHeatmapProps> = ({
     heatmapGroup.addTo(map);
     corridorGroup.addTo(map);
 
-    // Fit bounds including route waypoints, parking zone (if Samui), and station label coordinates
-    const labelPoints = (kp0LabelCoord && kpEndLabelCoord)
-      ? [
-          { lat: kp0LabelCoord[0], lng: kp0LabelCoord[1] },
-          { lat: kpEndLabelCoord[0], lng: kpEndLabelCoord[1] },
-        ]
-      : undefined;
+    // Fit bounds including route waypoints, parking zone (if Samui), and station/parking label coordinates
+    const labelPoints: { lat: number; lng: number }[] = [];
+    if (kp0LabelCoord && kpEndLabelCoord) {
+      labelPoints.push(
+        { lat: kp0LabelCoord[0], lng: kp0LabelCoord[1] },
+        { lat: kpEndLabelCoord[0], lng: kpEndLabelCoord[1] }
+      );
+    }
+    if (parkingBoundsPoint) {
+      labelPoints.push(parkingBoundsPoint);
+    }
 
     const boundsWithLabels = getFullCorridorBounds(
       cableRoute.waypoints,
       isSamuiRoute ? parkingZone?.coordinates : undefined,
-      labelPoints
+      labelPoints.length > 0 ? labelPoints : undefined
     );
     map.fitBounds(boundsWithLabels, { padding: [30, 40], maxZoom: 14, animate: false });
 

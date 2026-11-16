@@ -295,20 +295,16 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
       });
       corridorGroup.addLayer(mk0);
 
-      const southOffset = Math.max(latSpan * 0.46, 0.022);
-      const northOffset = Math.max(latSpan * 0.46, 0.022);
-      const lngShift = Math.max(lngSpan * 0.08, 0.006);
+      const isKp0South = kp0.lat <= kpEnd.lat;
+      const southOffset = Math.max(latSpan * 0.36, 0.022);
+      const northOffset = Math.max(latSpan * 0.34, 0.022);
 
-      if (isKp0West) {
-        // kp0 is West (Koh Si Chang Island Terminal) -> move SOUTH into clear bottom water
-        kp0LabelCoord = [kp0.lat - southOffset, kp0.lng + lngShift];
-        // kpEnd is East (Si Racha Mainland Terminal) -> move NORTH into clear upper area
-        kpEndLabelCoord = [kpEnd.lat + northOffset, kpEnd.lng - lngShift];
+      if (isKp0South) {
+        kp0LabelCoord = [Math.min(kp0.lat, minLat) - southOffset, kp0.lng - 0.015];
+        kpEndLabelCoord = [Math.max(kpEnd.lat, maxLat) + northOffset, kpEnd.lng];
       } else {
-        // kp0 is East -> move NORTH
-        kp0LabelCoord = [kp0.lat + northOffset, kp0.lng - lngShift];
-        // kpEnd is West -> move SOUTH
-        kpEndLabelCoord = [kpEnd.lat - southOffset, kpEnd.lng + lngShift];
+        kp0LabelCoord = [Math.max(kp0.lat, maxLat) + northOffset, kp0.lng];
+        kpEndLabelCoord = [Math.min(kpEnd.lat, minLat) - southOffset, kpEnd.lng - 0.015];
       }
 
       const kp0LeaderLine = L.polyline(
@@ -332,7 +328,7 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
           </div>
         `,
         iconSize: [170, 26],
-        iconAnchor: isKp0West ? [85, 0] : [85, 26],
+        iconAnchor: isKp0South ? [85, 0] : [85, 26],
       });
       corridorGroup.addLayer(L.marker(kp0LabelCoord, { icon: kp0Icon, interactive: false }));
 
@@ -367,17 +363,23 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
           </div>
         `,
         iconSize: [180, 26],
-        iconAnchor: isKp0West ? [90, 26] : [90, 0],
+        iconAnchor: isKp0South ? [90, 26] : [90, 0],
       });
       corridorGroup.addLayer(L.marker(kpEndLabelCoord, { icon: kpEndIcon, interactive: false }));
 
-      // Safety Buffer Corridor Label (Positioned well to the North in open waters, clear of corridor)
+      // Safety Buffer Corridor Label (Positioned to the West/North in open waters, clear of corridor)
       const midIdx = Math.floor(cableRoute.waypoints.length / 2);
       const midWp = cableRoute.waypoints[midIdx] || kp0;
-      bufferLabelCoord = [maxLat + safeNorthOffset + 0.006, (minLng + maxLng) / 2];
+      bufferLabelCoord = isSamuiRoute
+        ? [midWp.lat + 0.01, minLng - 0.055]
+        : [maxLat + safeNorthOffset + 0.006, (minLng + maxLng) / 2];
+
+      const bufferTargetCoord: [number, number] = isSamuiRoute
+        ? [midWp.lat, midWp.lng - 0.005]
+        : [maxLat + 0.005, (minLng + maxLng) / 2];
 
       const bufferLeaderLine = L.polyline(
-        [[maxLat + 0.005, (minLng + maxLng) / 2], [bufferLabelCoord[0] - 0.003, bufferLabelCoord[1]]],
+        [bufferTargetCoord, bufferLabelCoord],
         {
           color: '#f59e0b',
           weight: 1.2,
@@ -396,7 +398,7 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
           </div>
         `,
         iconSize: [240, 26],
-        iconAnchor: [120, 13],
+        iconAnchor: isSamuiRoute ? [240, 13] : [120, 13],
       });
       corridorGroup.addLayer(L.marker(bufferLabelCoord, { icon: bufferIcon, interactive: false }));
     }
@@ -415,16 +417,21 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
       });
       corridorGroup.addLayer(parkingPoly);
 
-      // Label moved further NW to prevent overlaying cable route
-      const parkingLabelCoord: [number, number] = [9.640, 99.710];
-      const parkingNorthEdge: [number, number] = [9.580, 99.800];
+      const pLats = parkingZone.coordinates.map(c => c.lat);
+      const pLngs = parkingZone.coordinates.map(c => c.lng);
+      const pMinLng = Math.min(...pLngs);
+      const pMidLat = (Math.min(...pLats) + Math.max(...pLats)) / 2;
+
+      // Label moved to the LEFT (West) of the parking zone and right-anchored so it never overlaps the cable route
+      const parkingWestEdge: [number, number] = [pMidLat + 0.01, pMinLng];
+      const parkingLabelCoord: [number, number] = [pMidLat + 0.025, pMinLng - 0.045];
 
       // Leader line connecting outside label to parking boundary
-      const parkingLeaderLine = L.polyline([parkingNorthEdge, parkingLabelCoord], {
+      const parkingLeaderLine = L.polyline([parkingWestEdge, parkingLabelCoord], {
         color: '#60a5fa',
-        weight: 1.2,
+        weight: 1.4,
         dashArray: '3, 3',
-        opacity: 0.7,
+        opacity: 0.85,
         interactive: false,
       });
       corridorGroup.addLayer(parkingLeaderLine);
@@ -432,13 +439,13 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
       const parkingLabelIcon = L.divIcon({
         className: 'custom-outside-label',
         html: `
-          <div style="background: rgba(15, 23, 42, 0.95); border: 1.5px solid #3b82f6; border-radius: 6px; padding: 4px 12px; font-size: 10px; font-weight: bold; color: #60a5fa; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.6); display: flex; align-items: center; gap: 6px; box-sizing: border-box;">
+          <div style="background: rgba(15, 23, 42, 0.95); border: 1.5px solid #3b82f6; border-radius: 6px; padding: 4px 10px; font-size: 9.5px; font-weight: bold; color: #60a5fa; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.7); display: flex; align-items: center; gap: 6px; box-sizing: border-box;">
             <span>⚓</span>
-            <span>SAMUI PARKING ZONE (44.6 km² Anchorage)</span>
+            <span>Samui Vessel Parking Zone (44.6 km²)</span>
           </div>
         `,
-        iconSize: [290, 30],
-        iconAnchor: [145, 15],
+        iconSize: [240, 28],
+        iconAnchor: [240, 14],
       });
       corridorGroup.addLayer(L.marker(parkingLabelCoord, { icon: parkingLabelIcon, interactive: false }));
     }
@@ -608,6 +615,11 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
       });
       corridorGroup.addLayer(guideLine);
 
+      // Anchor horizontally away from the target coordinate so the pill never extends back over the cable route
+      const isLabelEast = z.labelCoord[1] > z.targetCoord[1] + 0.01;
+      const isLabelWest = z.labelCoord[1] < z.targetCoord[1] - 0.01;
+      const anchorX = isLabelEast ? 0 : isLabelWest ? 200 : 100;
+
       const icon = L.divIcon({
         className: 'custom-outside-zone-pill',
         html: `
@@ -618,7 +630,7 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
           </div>
         `,
         iconSize: [200, 24],
-        iconAnchor: [100, 12],
+        iconAnchor: [anchorX, 12],
       });
 
       const mk = L.marker(z.labelCoord, { icon, interactive: false });
@@ -632,8 +644,8 @@ export const CorridorHeatmapMap: React.FC<CorridorHeatmapMapProps> = ({
     const allLabelPoints = [
       { lat: kp0LabelCoord[0], lng: kp0LabelCoord[1] },
       { lat: kpEndLabelCoord[0], lng: kpEndLabelCoord[1] },
-      { lat: bufferLabelCoord[0], lng: bufferLabelCoord[1] },
-      ...zones.map(z => ({ lat: z.labelCoord[0], lng: z.labelCoord[1] })),
+      { lat: bufferLabelCoord[0], lng: bufferLabelCoord[1] - (isSamuiRoute ? 0.14 : 0) },
+      ...zones.map(z => ({ lat: z.labelCoord[0], lng: z.labelCoord[1] + (z.labelCoord[1] > z.targetCoord[1] ? 0.10 : -0.10) })),
     ];
 
     const boundsWithLabels = getFullCorridorBounds(
